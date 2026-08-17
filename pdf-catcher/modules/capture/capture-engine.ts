@@ -3,19 +3,38 @@ import { classifyPdf } from '../shared/classifier';
 import { buildFileName } from '../shared/file-name';
 import { getHost, isHttpUrl, normalizeUrl } from '../shared/url';
 import {
+  MAX_POST_BODY_BYTES,
   PENDING_TTL_MS,
   STORAGE_KEYS,
   type PdfRecord,
   type Settings
 } from '../shared/types';
+import {
+  clearAuthHeaders,
+  deleteAuthHeaders,
+  saveAuthHeaders
+} from '../storage/auth-header-repo';
+import {
+  clearPostBodies,
+  deletePostBodies,
+  savePostBody,
+  type StoredPostBody
+} from '../storage/post-body-repo';
 import { clearRecords, loadRecords, saveRecords, trimRecords } from '../storage/records-repo';
-import { clearTokens, deleteTokens, saveToken } from '../storage/token-repo';
-import { PendingRequestStore, parseContentRangeTotal } from './pending-requests';
+import { clearTokens, deleteTokens } from '../storage/token-repo';
+import {
+  PendingRequestStore,
+  parseContentRangeTotal,
+  type CapturedAuthHeader,
+  type PendingRequest
+} from './pending-requests';
 
 export interface CaptureEngineDeps {
   getSettings: () => Settings;
   onRecordsChanged: (records: PdfRecord[]) => void;
 }
+
+const FORBIDDEN_REUSABLE_HEADERS = new Set(['cookie', 'host', 'content-length', 'origin', 'referer']);
 
 export class CaptureEngine {
   private records: PdfRecord[] = [];
@@ -57,8 +76,9 @@ export class CaptureEngine {
         tabId,
         statusCode: 200,
         confidence: 'medium',
-        auth: { cookie: false },
-        source: 'dom'
+        auth: { cookie: false, authHeaders: [] },
+        source: 'dom',
+        method: 'GET'
       });
       added += 1;
     }
@@ -71,8 +91,9 @@ export class CaptureEngine {
   }
 
   async deleteRecord(id: string): Promise<PdfRecord[]> {
-    this.records = this.records.filter((record) => record.id !== id);
-    await deleteTokens([id]);
+    const record = this.records.find((item) => item.id === id);
+    this.records = this.records.filter((item) => item.id !== id);
+    await this.deleteRecordExtras(record);
     await this.persist();
     return this.records;
   }
@@ -80,6 +101,8 @@ export class CaptureEngine {
   async clearAll(): Promise<PdfRecord[]> {
     this.records = [];
     await clearTokens();
+    await clearAuthHeaders();
+    await clearPostBodies();
     await clearRecords();
     this.deps.onRecordsChanged([]);
     return [];
@@ -87,15 +110,22 @@ export class CaptureEngine {
 
   async applySettings(settings: Settings): Promise<void> {
     const keptIds = new Set(trimRecords(this.records, settings).map((record) => record.id));
-    const removedIds = this.records
-      .filter((record) => !keptIds.has(record.id))
-      .map((record) => record.id);
+    const removed = this.records.filter((record) => !keptIds.has(record.id));
     this.records = trimRecords(this.records, settings);
-    if (removedIds.length) await deleteTokens(removedIds);
+    await this.deleteRecordExtras(removed);
     await this.persist();
   }
 
   private registerListeners(): void {
+    browser.webRequest.onBeforeRequest.addListener(
+      (details) => {
+        this.handleBeforeRequest(details);
+        return undefined;
+      },
+      { urls: ['http://*/*', 'https://*/*'] },
+      ['requestBody']
+    );
+
     browser.webRequest.onBeforeSendHeaders.addListener(
       (details) => {
         this.handleBeforeSendHeaders(details);
@@ -128,27 +158,62 @@ export class CaptureEngine {
       (details) => this.pending.delete(details.requestId),
       { urls: ['http://*/*', 'https://*/*'] }
     );
-
   }
 
   private schedulePendingSweep(): void {
     setInterval(() => this.pending.sweep(), 60_000);
   }
 
+  private handleBeforeRequest(details: Browser.webRequest.OnBeforeRequestDetails): void {
+    const settings = this.deps.getSettings();
+    if (!settings.captureEnabled || !settings.capturePostPdf) return;
+    if (details.method !== 'POST') return;
+    if (details.tabId < 0 || !details.requestId || !isHttpUrl(details.url)) return;
+    if (this.isHostIgnored(getHost(details.url), settings.ignoredHosts)) return;
+
+    const postBody = this.buildPostBody(details.requestBody);
+    if (!postBody) return;
+
+    this.pending.set({
+      requestId: details.requestId,
+      url: details.url,
+      tabId: details.tabId,
+      method: details.method,
+      createdAt: Date.now(),
+      hasCookie: false,
+      hasRange: false,
+      authHeaderValues: [],
+      postBody
+    });
+  }
+
   private handleBeforeSendHeaders(details: Browser.webRequest.OnBeforeSendHeadersDetails): void {
     const settings = this.deps.getSettings();
     if (!settings.captureEnabled) return;
-    if (details.method !== 'GET') return;
-    if (details.tabId < 0) return;
-    if (!details.requestId || !isHttpUrl(details.url)) return;
-
-    const host = getHost(details.url);
-    if (this.isHostIgnored(host, settings.ignoredHosts)) return;
+    const isGet = details.method === 'GET';
+    const isPost = details.method === 'POST' && settings.capturePostPdf;
+    if (!isGet && !isPost) return;
+    if (details.tabId < 0 || !details.requestId || !isHttpUrl(details.url)) return;
+    if (this.isHostIgnored(getHost(details.url), settings.ignoredHosts)) return;
 
     const headers = details.requestHeaders ?? [];
+    const existing = this.pending.get(details.requestId);
     const hasCookie = headers.some((header) => header.name.toLowerCase() === 'cookie');
     const hasRange = headers.some((header) => header.name.toLowerCase() === 'range');
-    const authorization = headers.find((header) => header.name.toLowerCase() === 'authorization');
+    const authHeaderValues = this.collectAuthHeaders(headers, settings.reusableHeaders);
+
+    if (existing) {
+      existing.method = details.method;
+      existing.hasCookie = hasCookie;
+      existing.hasRange = hasRange;
+      existing.authHeaderValues = authHeaderValues;
+      if (existing.postBody) {
+        existing.postBody.contentType = headers.find(
+          (header) => header.name.toLowerCase() === 'content-type'
+        )?.value;
+      }
+      return;
+    }
 
     this.pending.set({
       requestId: details.requestId,
@@ -158,7 +223,7 @@ export class CaptureEngine {
       createdAt: Date.now(),
       hasCookie,
       hasRange,
-      authorizationValue: authorization?.value ? String(authorization.value) : undefined
+      authHeaderValues
     });
   }
 
@@ -213,7 +278,6 @@ export class CaptureEngine {
 
     if (!verdict.isPdf) return;
 
-    const settings = this.deps.getSettings();
     const auth = this.buildAuth(pending);
     const record: PdfRecord = {
       id: crypto.randomUUID(),
@@ -230,21 +294,31 @@ export class CaptureEngine {
       partial: statusCode === 206,
       confidence: verdict.confidence,
       auth,
-      source: 'network'
+      source: 'network',
+      method: pending.method === 'POST' ? 'POST' : 'GET'
     };
 
     this.upsertRecord(record);
-
-    const authorization = pending.authorizationValue;
-    if (settings.reuseAuthorization && authorization && record.auth.bearerScheme) {
-      void saveToken(record.id, authorization);
-      record.auth.bearerTokenRef = record.id;
-    }
-
-    void this.persist();
+    void this.storeRecordExtras(record, pending).finally(() => this.persist());
   }
 
-  private updateRangeRecord(pending: NonNullable<ReturnType<PendingRequestStore['get']>>): void {
+  private async storeRecordExtras(record: PdfRecord, pending: PendingRequest): Promise<void> {
+    const settings = this.deps.getSettings();
+    const reusableValues = Object.fromEntries(
+      pending.authHeaderValues.map((header) => [header.name, header.value])
+    );
+
+    if (settings.reuseAuthorization && Object.keys(reusableValues).length > 0) {
+      await saveAuthHeaders(record.id, reusableValues);
+      record.auth.tokenRef = record.id;
+    }
+
+    if (record.method === 'POST' && pending.postBody) {
+      await savePostBody(record.id, pending.postBody);
+    }
+  }
+
+  private updateRangeRecord(pending: PendingRequest): void {
     const normalized = normalizeUrl(pending.url);
     const existing = this.records.find((record) => normalizeUrl(record.url) === normalized);
     if (!existing) return;
@@ -256,18 +330,82 @@ export class CaptureEngine {
     }
   }
 
-  private buildAuth(pending: NonNullable<ReturnType<PendingRequestStore['get']>>): PdfRecord['auth'] {
-    const auth: PdfRecord['auth'] = { cookie: pending.hasCookie };
-    const authorization = pending.authorizationValue;
+  private buildAuth(pending: PendingRequest): PdfRecord['auth'] {
+    const auth: PdfRecord['auth'] = {
+      cookie: pending.hasCookie,
+      authHeaders: pending.authHeaderValues.map((header) => header.name.toLowerCase())
+    };
+
+    const authorization = pending.authHeaderValues.find(
+      (header) => header.name.toLowerCase() === 'authorization'
+    );
     if (!authorization) return auth;
 
-    const match = /^(\S+)\s+\S+$/.exec(authorization.trim());
-    if (!match?.[1]) return auth;
-    const scheme = match[1];
-    if (/bearer|token|api-?key|apikey/i.test(scheme)) {
-      auth.bearerScheme = scheme;
+    const match = /^(\S+)\s+\S+$/.exec(authorization.value.trim());
+    if (match?.[1] && /bearer|token|api-?key|apikey/i.test(match[1])) {
+      auth.bearerScheme = match[1];
     }
     return auth;
+  }
+
+  private collectAuthHeaders(
+    headers: Array<{ name: string; value?: string }>,
+    reusableHeaders: string[]
+  ): CapturedAuthHeader[] {
+    const allowed = new Set(
+      ['authorization', ...reusableHeaders].map((name) => name.trim().toLowerCase())
+    );
+    const result: CapturedAuthHeader[] = [];
+
+    for (const header of headers) {
+      const name = header.name.trim().toLowerCase();
+      if (!name || FORBIDDEN_REUSABLE_HEADERS.has(name)) continue;
+      if (!allowed.has(name) || typeof header.value !== 'string') continue;
+      result.push({ name, value: header.value });
+    }
+    return result;
+  }
+
+  private buildPostBody(requestBody: Browser.webRequest.OnBeforeRequestDetails['requestBody']): StoredPostBody | undefined {
+    if (!requestBody) return undefined;
+
+    if (requestBody.formData) {
+      let size = 0;
+      const formData: Record<string, string[]> = {};
+      for (const [key, values] of Object.entries(requestBody.formData)) {
+        const stringValues = (values ?? []).filter(
+          (value): value is string => typeof value === 'string'
+        );
+        if (!stringValues.length) continue;
+        for (const value of stringValues) size += value.length;
+        if (size > MAX_POST_BODY_BYTES) return undefined;
+        formData[key] = stringValues;
+      }
+      if (!Object.keys(formData).length) return undefined;
+      return { kind: 'form', formData };
+    }
+
+    if (requestBody.raw?.length) {
+      let total = 0;
+      for (const entry of requestBody.raw) {
+        if (entry.bytes) total += entry.bytes.byteLength;
+      }
+      if (total > MAX_POST_BODY_BYTES) return undefined;
+
+      const chunks: Uint8Array[] = [];
+      for (const entry of requestBody.raw) {
+        if (entry.bytes) chunks.push(new Uint8Array(entry.bytes));
+      }
+      const bytes = new Uint8Array(chunks.reduce((sum, chunk) => sum + chunk.length, 0));
+      let offset = 0;
+      for (const chunk of chunks) {
+        bytes.set(chunk, offset);
+        offset += chunk.length;
+      }
+      return { kind: 'raw', base64: bytesToBase64(bytes) };
+    }
+
+    return undefined;
   }
 
   private upsertRecord(record: PdfRecord): void {
@@ -275,12 +413,30 @@ export class CaptureEngine {
     const existingIndex = this.records.findIndex((item) => normalizeUrl(item.url) === normalized);
     if (existingIndex >= 0) {
       const removed = this.records[existingIndex];
-      if (removed?.auth.bearerTokenRef) void deleteTokens([removed.auth.bearerTokenRef]);
+      if (removed) void this.deleteRecordExtras(removed);
       this.records.splice(existingIndex, 1);
     }
     this.records.unshift(record);
-    const settings = this.deps.getSettings();
-    this.records = trimRecords(this.records, settings);
+    this.records = trimRecords(this.records, this.deps.getSettings());
+  }
+
+  private async deleteRecordExtras(recordOrRecords: PdfRecord | PdfRecord[] | undefined): Promise<void> {
+    const records = Array.isArray(recordOrRecords)
+      ? recordOrRecords
+      : recordOrRecords
+        ? [recordOrRecords]
+        : [];
+    if (!records.length) return;
+
+    const ids = records.map((record) => record.id);
+    const tokenRefs = records.flatMap((record) => [
+      record.auth.tokenRef,
+      record.auth.bearerTokenRef
+    ]).filter((ref): ref is string => Boolean(ref));
+
+    await deleteAuthHeaders(ids);
+    await deleteTokens(tokenRefs);
+    await deletePostBodies(ids);
   }
 
   private persist(): Promise<void> {
@@ -304,6 +460,15 @@ export class CaptureEngine {
       return host.toLowerCase() === normalized;
     });
   }
+}
+
+function bytesToBase64(bytes: Uint8Array): string {
+  let binary = '';
+  for (let offset = 0; offset < bytes.length; offset += 0x8000) {
+    const chunk = bytes.subarray(offset, offset + 0x8000);
+    binary += String.fromCharCode(...chunk);
+  }
+  return btoa(binary);
 }
 
 export { PENDING_TTL_MS, STORAGE_KEYS };

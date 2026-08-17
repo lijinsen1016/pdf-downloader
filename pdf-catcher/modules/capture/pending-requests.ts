@@ -9,6 +9,18 @@ export interface PendingResponse {
   fromCache?: boolean;
 }
 
+export interface CapturedAuthHeader {
+  name: string;
+  value: string;
+}
+
+export interface CapturedPostBody {
+  contentType?: string;
+  kind: 'form' | 'raw';
+  formData?: Record<string, string[]>;
+  base64?: string;
+}
+
 export interface PendingRequest {
   requestId: string;
   url: string;
@@ -18,7 +30,8 @@ export interface PendingRequest {
   createdAt: number;
   hasCookie: boolean;
   hasRange: boolean;
-  authorizationValue?: string;
+  authHeaderValues: CapturedAuthHeader[];
+  postBody?: CapturedPostBody;
   response?: PendingResponse;
 }
 

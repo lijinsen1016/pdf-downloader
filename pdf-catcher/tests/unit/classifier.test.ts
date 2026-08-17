@@ -60,13 +60,23 @@ describe('classifyPdf', () => {
     expect(verdict).toEqual({ isPdf: false, reason: 'non-2xx' });
   });
 
-  it('rejects non-GET methods', () => {
+  it('allows POST-generated PDFs', () => {
     const verdict = classifyPdf({
       method: 'POST',
+      statusCode: 200,
+      url: 'https://example.com/generate',
+      contentType: 'application/pdf'
+    });
+    expect(verdict).toMatchObject({ isPdf: true, source: 'content-type' });
+  });
+
+  it('rejects unsupported methods', () => {
+    const verdict = classifyPdf({
+      method: 'PUT',
       statusCode: 200,
       url: 'https://example.com/doc.pdf',
       contentType: 'application/pdf'
     });
-    expect(verdict).toEqual({ isPdf: false, reason: 'non-get' });
+    expect(verdict).toEqual({ isPdf: false, reason: 'non-get-post' });
   });
 });

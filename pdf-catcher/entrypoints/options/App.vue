@@ -10,6 +10,7 @@ const { t } = useI18n();
 
 const form = ref<Settings>({ ...DEFAULT_SETTINGS });
 const ignoredHostsText = ref('');
+const reusableHeadersText = ref('');
 const saving = ref(false);
 const saved = ref(false);
 const clearing = ref(false);
@@ -24,6 +25,7 @@ async function load(): Promise<void> {
     if (response.ok && response.settings) {
       form.value = response.settings as Settings;
       ignoredHostsText.value = form.value.ignoredHosts.join('\n');
+      reusableHeadersText.value = form.value.reusableHeaders.join('\n');
       setLanguage(form.value.language);
     }
   } catch {
@@ -42,6 +44,11 @@ async function save(): Promise<void> {
       maxRecords: Number(form.value.maxRecords),
       reuseAuthorization: form.value.reuseAuthorization,
       historyEnabled: form.value.historyEnabled,
+      capturePostPdf: form.value.capturePostPdf,
+      reusableHeaders: reusableHeadersText.value
+        .split('\n')
+        .map((header) => header.trim().toLowerCase())
+        .filter(Boolean),
       ignoredHosts: ignoredHostsText.value
         .split('\n')
         .map((host) => host.trim())
@@ -50,6 +57,7 @@ async function save(): Promise<void> {
     const response = await send({ type: 'settings/update', patch });
     if (response.ok && response.settings) {
       form.value = response.settings as Settings;
+      reusableHeadersText.value = form.value.reusableHeaders.join('\n');
       setLanguage(form.value.language);
       saved.value = true;
       window.setTimeout(() => {
@@ -116,6 +124,14 @@ onMounted(load);
         <input v-model.number="form.maxRecords" type="number" min="10" max="2000" />
         <small>{{ t('options.maxRecordsHint') }}</small>
       </label>
+
+      <label class="row">
+        <div>
+          <strong>{{ t('options.capturePostPdf') }}</strong>
+          <p>{{ t('options.capturePostPdfHint') }}</p>
+        </div>
+        <input v-model="form.capturePostPdf" type="checkbox" />
+      </label>
     </section>
 
     <section class="card">
@@ -149,6 +165,16 @@ onMounted(load);
         <span>{{ t('options.ignoredHosts') }}</span>
         <textarea v-model="ignoredHostsText" rows="4" :placeholder="'example.com\n*.example.com'"></textarea>
         <small>{{ t('options.ignoredHostsHint') }}</small>
+      </label>
+
+      <label class="field">
+        <span>{{ t('options.reusableHeaders') }}</span>
+        <textarea
+          v-model="reusableHeadersText"
+          rows="5"
+          placeholder="authorization&#10;x-api-key&#10;x-auth-token"
+        ></textarea>
+        <small>{{ t('options.reusableHeadersHint') }}</small>
       </label>
     </section>
 

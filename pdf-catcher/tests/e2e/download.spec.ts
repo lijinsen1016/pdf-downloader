@@ -115,11 +115,11 @@ test.describe('bearer auth downloads', () => {
 
       const state = await waitForState(
         popup,
-        (s) => s.records.some((record) => record.url.endsWith('/bearer.pdf') && Boolean(record.auth.bearerTokenRef))
+        (s) => s.records.some((record) => record.url.endsWith('/bearer.pdf') && Boolean(record.auth.tokenRef))
       );
       const record = state.records.find((item) => item.url.endsWith('/bearer.pdf'))!;
       expect(record.auth.bearerScheme).toBe('Bearer');
-      expect(record.auth.bearerTokenRef).toBe(record.id);
+      expect(record.auth.tokenRef).toBe(record.id);
 
       await popup.evaluate(async (recordId) => {
         const chromeRef = (globalThis as unknown as {

@@ -112,7 +112,7 @@ test.describe('v2 features', () => {
 
       const state = await waitForState(
         popup,
-        (s) => s.records.some((record) => record.url.endsWith('/bearer.pdf') && Boolean(record.auth.bearerTokenRef))
+        (s) => s.records.some((record) => record.url.endsWith('/bearer.pdf') && Boolean(record.auth.tokenRef))
       );
       const record = state.records.find((item) => item.url.endsWith('/bearer.pdf'))!;
 

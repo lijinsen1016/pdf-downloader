@@ -1,5 +1,6 @@
 import { browser } from 'wxt/browser';
 import { offscreenBlobResponseSchema } from '@/modules/protocol/schemas';
+import type { StoredPostBody } from '@/modules/storage/post-body-repo';
 
 const OFFSCREEN_PATH = '/offscreen.html';
 
@@ -37,7 +38,9 @@ export async function ensureOffscreenDocument(): Promise<void> {
 export async function fetchBlobInOffscreen(params: {
   jobId: string;
   url: string;
-  authorizationHeader?: string;
+  headers?: Record<string, string>;
+  method?: 'GET' | 'POST';
+  postBody?: StoredPostBody;
   leaseMs?: number;
 }): Promise<{ blobUrl: string; contentType: string; size: number }> {
   await ensureOffscreenDocument();

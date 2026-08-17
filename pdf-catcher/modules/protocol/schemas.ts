@@ -3,7 +3,9 @@ import type { DownloadHistoryItem, DownloadJob, PdfRecord, Settings } from '../s
 
 export const pdfRecordAuthSchema = z.object({
   cookie: z.boolean(),
+  authHeaders: z.array(z.string()).default([]),
   bearerScheme: z.string().optional(),
+  tokenRef: z.string().optional(),
   bearerTokenRef: z.string().optional()
 });
 
@@ -22,7 +24,8 @@ export const pdfRecordSchema = z.object({
   partial: z.boolean().optional(),
   confidence: z.enum(['high', 'medium']),
   auth: pdfRecordAuthSchema,
-  source: z.enum(['network', 'dom']).optional()
+  source: z.enum(['network', 'dom']).optional(),
+  method: z.enum(['GET', 'POST']).optional()
 });
 
 export const historyItemSchema = z.object({
@@ -59,7 +62,9 @@ export const settingsSchema = z.object({
   maxRecords: z.number().int().min(10).max(2000),
   reuseAuthorization: z.boolean(),
   ignoredHosts: z.array(z.string()),
-  historyEnabled: z.boolean().default(false)
+  historyEnabled: z.boolean().default(false),
+  capturePostPdf: z.boolean().default(false),
+  reusableHeaders: z.array(z.string()).default(['authorization'])
 });
 
 export type ParsedPdfRecord = z.infer<typeof pdfRecordSchema>;
@@ -130,7 +135,16 @@ export const offscreenToDocumentSchema = z.discriminatedUnion('type', [
     type: z.literal('offscreen/fetch-blob'),
     jobId: z.string(),
     url: z.string(),
-    authorizationHeader: z.string().optional(),
+    headers: z.record(z.string(), z.string()).optional(),
+    method: z.enum(['GET', 'POST']).optional(),
+    postBody: z
+      .object({
+        contentType: z.string().optional(),
+        kind: z.enum(['form', 'raw']),
+        formData: z.record(z.string(), z.array(z.string())).optional(),
+        base64: z.string().optional()
+      })
+      .optional(),
     leaseMs: z.number().optional()
   }),
   z.object({

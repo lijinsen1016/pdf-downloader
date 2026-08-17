@@ -4,6 +4,7 @@ import { CaptureEngine } from '@/modules/capture/capture-engine';
 import { collectPdfLinks } from '@/modules/capture/page-scanner';
 import { DownloadManager } from '@/modules/downloads/download-manager';
 import { popupToBackgroundSchema, safeParse, type PortEvent } from '@/modules/protocol/schemas';
+import { loadAuthHeaders } from '@/modules/storage/auth-header-repo';
 import {
   addHistoryItem,
   clearHistory,
@@ -12,7 +13,7 @@ import {
 } from '@/modules/storage/history-repo';
 import { getSettings, saveSettings, subscribeSettings } from '@/modules/storage/settings-repo';
 import { loadTokens } from '@/modules/storage/token-repo';
-import { DEFAULT_SETTINGS, type Settings } from '@/modules/shared/types';
+import { DEFAULT_SETTINGS, type PdfRecord, type Settings } from '@/modules/shared/types';
 import { getHost } from '@/modules/shared/url';
 
 export default defineBackground(() => {
@@ -36,10 +37,21 @@ export default defineBackground(() => {
     }
   });
 
+  async function getAuthHeadersForRecord(record: PdfRecord): Promise<Record<string, string>> {
+    const ref = record.auth.tokenRef ?? record.auth.bearerTokenRef;
+    if (!ref) return {};
+    const stored = await loadAuthHeaders();
+    const values = stored[ref];
+    if (values) return { ...values };
+    const legacy = await loadTokens();
+    if (legacy[ref]) return { Authorization: legacy[ref] };
+    return {};
+  }
+
   const downloadManager = new DownloadManager({
     getSettings: () => settings,
     getRecords: () => engine.getRecords(),
-    getToken: async (ref) => (await loadTokens())[ref],
+    getAuthHeaders: getAuthHeadersForRecord,
     broadcast,
     onDownloadCompleted: async (job) => {
       if (!settings.historyEnabled) return;

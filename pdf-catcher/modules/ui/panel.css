@@ -876,3 +876,8 @@ select:focus-visible {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+.pill.post {
+  color: #7a4f01;
+  background: #f6e7bf;
+}

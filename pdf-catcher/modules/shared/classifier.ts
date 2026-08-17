@@ -25,8 +25,9 @@ function normalizeHeaderValue(value: string | undefined): string {
 }
 
 export function classifyPdf(input: ClassifyInput): PdfVerdict {
-  if (input.method.toUpperCase() !== 'GET') {
-    return { isPdf: false, reason: 'non-get' };
+  const method = input.method.toUpperCase();
+  if (method !== 'GET' && method !== 'POST') {
+    return { isPdf: false, reason: 'non-get-post' };
   }
 
   if (input.statusCode < 200 || input.statusCode >= 300) {

@@ -2,6 +2,7 @@ import { browser } from 'wxt/browser';
 import { safeParse, offscreenToDocumentSchema } from '@/modules/protocol/schemas';
 import { looksLikePdfFileName } from '@/modules/shared/file-name';
 import { parseContentDisposition } from '@/modules/shared/content-disposition';
+import type { StoredPostBody } from '@/modules/storage/post-body-repo';
 
 const controllers = new Map<string, AbortController>();
 const blobUrls = new Set<string>();
@@ -11,24 +12,64 @@ const isPdfContentType = (contentType: string) => {
   return mime === 'application/pdf' || mime === 'application/x-pdf' || mime === 'text/pdf';
 };
 
+function base64ToBytes(base64: string): Uint8Array<ArrayBuffer> {
+  const binary = atob(base64);
+  const bytes = new Uint8Array(new ArrayBuffer(binary.length));
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index);
+  }
+  return bytes;
+}
+
+function buildPostRequest(body: StoredPostBody): { body?: BodyInit; contentType?: string } {
+  if (body.kind === 'form') {
+    const params = new URLSearchParams();
+    for (const [key, values] of Object.entries(body.formData ?? {})) {
+      for (const value of values) params.append(key, value);
+    }
+    return {
+      body: params.toString(),
+      contentType: body.contentType || 'application/x-www-form-urlencoded'
+    };
+  }
+
+  if (body.base64) {
+    return { body: new Blob([base64ToBytes(body.base64)]), contentType: body.contentType };
+  }
+  return {};
+}
+
 async function fetchPdfBlob(message: {
   jobId: string;
   url: string;
-  authorizationHeader?: string;
+  headers?: Record<string, string>;
+  method?: 'GET' | 'POST';
+  postBody?: StoredPostBody;
   leaseMs?: number;
 }): Promise<{ blobUrl: string; contentType: string; size: number }> {
   const controller = new AbortController();
   controllers.set(message.jobId, controller);
 
   try {
-    const headers = new Headers();
-    if (message.authorizationHeader) {
-      headers.set('Authorization', message.authorizationHeader);
+    const headers = new Headers(message.headers ?? {});
+    const method = message.method ?? 'GET';
+    let body: BodyInit | undefined;
+    let postContentType: string | undefined;
+
+    if (method === 'POST' && message.postBody) {
+      const built = buildPostRequest(message.postBody);
+      body = built.body;
+      postContentType = built.contentType;
+    }
+
+    if (postContentType && !headers.has('content-type')) {
+      headers.set('content-type', postContentType);
     }
 
     const response = await fetch(message.url, {
-      method: 'GET',
+      method,
       headers,
+      body,
       credentials: 'include',
       redirect: 'follow',
       signal: controller.signal
@@ -64,34 +105,34 @@ async function fetchPdfBlob(message: {
 }
 
 browser.runtime.onMessage.addListener((message: unknown, _sender, sendResponse) => {
-    const request = safeParse(offscreenToDocumentSchema, message);
-    if (!request) return false;
+  const request = safeParse(offscreenToDocumentSchema, message);
+  if (!request) return false;
 
-    if (request.type === 'offscreen/ping') {
-      sendResponse({ ok: true });
-      return false;
-    }
+  if (request.type === 'offscreen/ping') {
+    sendResponse({ ok: true });
+    return false;
+  }
 
-    if (request.type === 'offscreen/revoke-blob') {
-      URL.revokeObjectURL(request.blobUrl);
-      blobUrls.delete(request.blobUrl);
-      sendResponse({ ok: true });
-      return false;
-    }
+  if (request.type === 'offscreen/revoke-blob') {
+    URL.revokeObjectURL(request.blobUrl);
+    blobUrls.delete(request.blobUrl);
+    sendResponse({ ok: true });
+    return false;
+  }
 
-    if (request.type === 'offscreen/cancel-fetch') {
-      controllers.get(request.jobId)?.abort();
-      sendResponse({ ok: true });
-      return false;
-    }
+  if (request.type === 'offscreen/cancel-fetch') {
+    controllers.get(request.jobId)?.abort();
+    sendResponse({ ok: true });
+    return false;
+  }
 
-    void fetchPdfBlob(request)
-      .then((result) => sendResponse({ ok: true, ...result }))
-      .catch((error: unknown) => {
-        sendResponse({
-          ok: false,
-          error: error instanceof Error ? error.message : String(error)
-        });
+  void fetchPdfBlob(request)
+    .then((result) => sendResponse({ ok: true, ...result }))
+    .catch((error: unknown) => {
+      sendResponse({
+        ok: false,
+        error: error instanceof Error ? error.message : String(error)
       });
-    return true;
-  });
+    });
+  return true;
+});

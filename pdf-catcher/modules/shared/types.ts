@@ -3,9 +3,13 @@ export type PdfConfidence = 'high' | 'medium';
 export interface PdfRecordAuth {
   /** 请求时浏览器是否带有 Cookie */
   cookie: boolean;
+  /** 已识别的鉴权/自定义头名称（小写），只保存名称 */
+  authHeaders: string[];
   /** 例如 'Bearer'，不包含 token 值 */
   bearerScheme?: string;
-  /** 仅当用户开启会话级复用且 token 已保存时存在 */
+  /** 仅当用户开启会话级复用且头值已保存时存在 */
+  tokenRef?: string;
+  /** @deprecated 兼容旧会话记录，新记录使用 tokenRef */
   bearerTokenRef?: string;
 }
 
@@ -26,6 +30,8 @@ export interface PdfRecord {
   auth: PdfRecordAuth;
   /** network: 来自 webRequest 捕获；dom: 来自页面链接扫描 */
   source?: 'network' | 'dom';
+  /** 生成型 PDF 使用 POST 请求 */
+  method?: 'GET' | 'POST';
 }
 
 export interface DownloadHistoryItem {
@@ -75,6 +81,10 @@ export interface Settings {
   ignoredHosts: string[];
   /** 下载历史默认关闭，仅保存脱敏后的文件名/URL/时间 */
   historyEnabled: boolean;
+  /** 是否捕获 POST 生成型 PDF，默认关闭 */
+  capturePostPdf: boolean;
+  /** 会话级复用白名单，例如 authorization / x-api-key / x-auth-token */
+  reusableHeaders: string[];
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -84,7 +94,9 @@ export const DEFAULT_SETTINGS: Settings = {
   maxRecords: 200,
   reuseAuthorization: false,
   ignoredHosts: [],
-  historyEnabled: false
+  historyEnabled: false,
+  capturePostPdf: false,
+  reusableHeaders: ['authorization']
 };
 
 export const STORAGE_KEYS = {
@@ -92,10 +104,13 @@ export const STORAGE_KEYS = {
   settings: 'settings:v1',
   jobs: 'downloadJobs:v1',
   bearerTokens: 'bearerTokens:v1',
-  history: 'history:v1'
+  history: 'history:v1',
+  authHeaders: 'authHeaders:v1',
+  postBodies: 'postBodies:v1'
 } as const;
 
 export const MAX_HISTORY_ITEMS = 500;
+export const MAX_POST_BODY_BYTES = 2 * 1024 * 1024;
 
 export const MAX_PENDING_REQUESTS = 2000;
 export const PENDING_TTL_MS = 2 * 60 * 1000;

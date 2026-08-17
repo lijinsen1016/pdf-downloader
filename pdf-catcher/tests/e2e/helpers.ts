@@ -46,7 +46,8 @@ export async function startPdfServer(): Promise<TestServer> {
       res.writeHead(status, {
         'content-type': contentType,
         'access-control-allow-origin': '*',
-        'access-control-allow-headers': 'Authorization'
+        'access-control-allow-headers': 'Authorization, X-Api-Key, Content-Type',
+        'access-control-allow-methods': 'GET, POST, OPTIONS'
       });
       res.end(body);
     };
@@ -113,6 +114,36 @@ export async function startPdfServer(): Promise<TestServer> {
       return;
     }
 
+    if (requestUrl.pathname === '/custom-header.pdf') {
+      const hasKey = req.headers['x-api-key'] === 'e2e-key';
+      if (hasKey) send(200, 'application/pdf', pdf);
+      else send(200, 'text/html; charset=utf-8', '<html><body>api key required</body></html>');
+      return;
+    }
+
+    if (requestUrl.pathname === '/generate') {
+      if (req.method !== 'POST') {
+        send(405, 'text/plain', 'method not allowed');
+        return;
+      }
+      let body = '';
+      req.on('data', (chunk) => {
+        body += chunk.toString('utf8');
+      });
+      req.on('end', () => {
+        if (body.includes('doc=report')) {
+          res.writeHead(200, {
+            'content-type': 'application/pdf',
+            'content-disposition': 'attachment; filename="generated-report.pdf"'
+          });
+          res.end(pdf);
+        } else {
+          send(200, 'text/html; charset=utf-8', '<html><body>invalid post body</body></html>');
+        }
+      });
+      return;
+    }
+
     send(404, 'text/plain', 'not found');
   });
 
@@ -176,7 +207,14 @@ export async function getState(popup: Page): Promise<{
     fileName: string;
     confidence: string;
     source?: string;
-    auth: { cookie: boolean; bearerScheme?: string; bearerTokenRef?: string };
+    method?: string;
+    auth: {
+      cookie: boolean;
+      authHeaders?: string[];
+      bearerScheme?: string;
+      tokenRef?: string;
+      bearerTokenRef?: string;
+    };
   }>;
   jobs: Array<{ id: string; recordId: string; status: string; errorDetail?: string }>;
   history: Array<{ id: string; url: string; fileName: string; downloadedAt: number }>;

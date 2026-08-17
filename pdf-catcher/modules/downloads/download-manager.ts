@@ -8,6 +8,7 @@ import {
 } from '../shared/types';
 import type { PortEvent } from '../protocol/schemas';
 import { loadJobs, saveJobs } from '../storage/jobs-repo';
+import { loadPostBody, type StoredPostBody } from '../storage/post-body-repo';
 import { openWithAuthorizationRule } from './auth-navigation';
 import {
   cancelFetchInOffscreen,
@@ -19,7 +20,7 @@ import {
 export interface DownloadManagerDeps {
   getSettings: () => Settings;
   getRecords: () => PdfRecord[];
-  getToken: (ref: string) => Promise<string | undefined>;
+  getAuthHeaders: (record: PdfRecord) => Promise<Record<string, string>>;
   broadcast: (event: PortEvent) => void;
   onDownloadCompleted?: (job: DownloadJob) => void | Promise<void>;
 }
@@ -122,29 +123,50 @@ export class DownloadManager {
       throw new Error('record not found');
     }
 
-    if (record.auth.bearerScheme && record.auth.bearerTokenRef) {
-      const token = await this.deps.getToken(record.auth.bearerTokenRef);
-      if (token) {
-        try {
-          await openWithAuthorizationRule(record.url, token);
-          return { url: record.url, usedBlob: false, usedAuthRule: true };
-        } catch {
-          // DNR 不可用时回退到 offscreen blob 阅读页
-        }
+    const authHeaders = await this.deps.getAuthHeaders(record);
 
-        try {
-          const blob = await fetchBlobInOffscreen({
-            jobId: `open-${crypto.randomUUID()}`,
-            url: record.url,
-            authorizationHeader: token,
-            leaseMs: OFFSCREEN_BLOB_LEASE_MS
-          });
-          this.leases.add(blob.blobUrl);
-          await browser.tabs.create({ url: blob.blobUrl, active: true });
-          return { url: blob.blobUrl, usedBlob: true };
-        } catch {
-          // 最后回退到原始 URL
-        }
+    if (record.method === 'POST') {
+      const postBody = await loadPostBody(record.id);
+      if (!postBody) {
+        throw new Error('post body is no longer available');
+      }
+      try {
+        const blob = await fetchBlobInOffscreen({
+          jobId: `open-${crypto.randomUUID()}`,
+          url: record.url,
+          method: 'POST',
+          postBody,
+          headers: authHeaders,
+          leaseMs: OFFSCREEN_BLOB_LEASE_MS
+        });
+        this.leases.add(blob.blobUrl);
+        await browser.tabs.create({ url: blob.blobUrl, active: true });
+        return { url: blob.blobUrl, usedBlob: true };
+      } catch {
+        // POST 阅读页失败时回退到原始 URL
+      }
+    }
+
+    if (Object.keys(authHeaders).length > 0) {
+      try {
+        await openWithAuthorizationRule(record.url, authHeaders);
+        return { url: record.url, usedBlob: false, usedAuthRule: true };
+      } catch {
+        // DNR 不可用时回退到 offscreen blob 阅读页
+      }
+
+      try {
+        const blob = await fetchBlobInOffscreen({
+          jobId: `open-${crypto.randomUUID()}`,
+          url: record.url,
+          headers: authHeaders,
+          leaseMs: OFFSCREEN_BLOB_LEASE_MS
+        });
+        this.leases.add(blob.blobUrl);
+        await browser.tabs.create({ url: blob.blobUrl, active: true });
+        return { url: blob.blobUrl, usedBlob: true };
+      } catch {
+        // 最后回退到原始 URL
       }
     }
 
@@ -218,26 +240,47 @@ export class DownloadManager {
       return;
     }
 
-    const tokenRef = record.auth.bearerTokenRef;
-    const token = tokenRef ? await this.deps.getToken(tokenRef) : undefined;
+    const authHeaders = await this.deps.getAuthHeaders(record);
 
-    if (tokenRef && token) {
+    if (record.method === 'POST') {
+      const postBody = await loadPostBody(record.id);
+      if (!postBody) {
+        this.updateJob(job.id, { status: 'failed', errorKey: 'message.postBodyMissing' });
+        return;
+      }
       try {
-        await this.runOffscreenDownload(job, record, token);
+        await this.runOffscreenDownload(job, record, {
+          method: 'POST',
+          postBody,
+          headers: authHeaders
+        });
       } catch (error) {
         this.failJob(job, 'message.downloadFailed', error);
       }
       return;
     }
 
-    if (tokenRef && !token) {
-      this.updateJob(job.id, { status: 'failed', errorKey: 'message.authTokenExpired' });
+    if (Object.keys(authHeaders).length > 0) {
+      try {
+        await this.runOffscreenDownload(job, record, { headers: authHeaders });
+      } catch (error) {
+        this.failJob(job, 'message.downloadFailed', error);
+      }
+      return;
+    }
+
+    if (record.auth.authHeaders.length > 0 && !record.auth.cookie) {
+      this.updateJob(job.id, {
+        status: 'failed',
+        errorKey: 'message.authReuseDisabled',
+        errorDetail: record.auth.authHeaders.join(', ')
+      });
       return;
     }
 
     if (record.auth.cookie) {
       try {
-        await this.runOffscreenDownload(job, record, undefined);
+        await this.runOffscreenDownload(job, record, {});
       } catch {
         if (job.status === 'canceled') return;
         try {
@@ -274,13 +317,19 @@ export class DownloadManager {
   private async runOffscreenDownload(
     job: DownloadJob,
     record: PdfRecord,
-    authorizationHeader?: string
+    options: {
+      headers?: Record<string, string>;
+      method?: 'GET' | 'POST';
+      postBody?: StoredPostBody;
+    } = {}
   ): Promise<void> {
     this.updateJob(job.id, { status: 'fetching', errorKey: undefined, errorDetail: undefined });
     const blob = await fetchBlobInOffscreen({
       jobId: job.id,
       url: record.url,
-      authorizationHeader
+      headers: options.headers,
+      method: options.method,
+      postBody: options.postBody
     });
 
     if (job.status === 'canceled') {

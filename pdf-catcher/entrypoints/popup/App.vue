@@ -203,7 +203,7 @@ function openItemUrl(url: string): void {
               :class="{
                 selected: store.selectedIds.has(record.id),
                 'dom-source': record.source === 'dom',
-                'auth-source': record.auth.cookie || Boolean(record.auth.bearerScheme)
+                'auth-source': record.auth.cookie || record.auth.authHeaders.length > 0
               }"
             >
               <label class="check-control">
@@ -228,10 +228,11 @@ function openItemUrl(url: string): void {
                 <div class="record-meta">
                   <span v-if="record.size">{{ store.formatSize(record.size) }}</span>
                   <span v-if="record.source === 'dom'" class="pill source">{{ t('app.pageLink') }}</span>
-                  <span v-if="record.auth.cookie || record.auth.bearerScheme" class="pill auth">
+                  <span v-if="record.method === 'POST'" class="pill post">{{ t('app.methodPost') }}</span>
+                  <span v-if="record.auth.cookie || record.auth.authHeaders.length" class="pill auth">
                     🔒 {{ t('message.loginRequired') }}
                   </span>
-                  <span v-if="record.auth.bearerTokenRef" class="pill session" :title="t('message.sessionOnly')">
+                  <span v-if="record.auth.tokenRef || record.auth.bearerTokenRef" class="pill session" :title="t('message.sessionOnly')">
                     {{ t('message.sessionOnly') }}
                   </span>
                 </div>

@@ -16,7 +16,7 @@ function createRuleId(): number {
  */
 export async function openWithAuthorizationRule(
   url: string,
-  authorizationHeader: string
+  headers: Record<string, string>
 ): Promise<boolean> {
   const ruleId = createRuleId();
   await browser.declarativeNetRequest.updateSessionRules({
@@ -26,13 +26,11 @@ export async function openWithAuthorizationRule(
         priority: 1,
         action: {
           type: 'modifyHeaders',
-          requestHeaders: [
-            {
-              header: 'Authorization',
-              operation: 'set',
-              value: authorizationHeader
-            }
-          ]
+          requestHeaders: Object.entries(headers).map(([header, value]) => ({
+            header,
+            operation: 'set',
+            value
+          }))
         },
         condition: {
           regexFilter: `^${escapeRegExp(url)}$`,

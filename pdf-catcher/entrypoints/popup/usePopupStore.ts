@@ -47,7 +47,7 @@ export function usePopupStore() {
         getHost(record.url).toLowerCase().includes(keyword);
       if (!matchesKeyword) return false;
 
-      if (filter.value === 'auth') return record.auth.cookie || Boolean(record.auth.bearerScheme);
+      if (filter.value === 'auth') return record.auth.cookie || record.auth.authHeaders.length > 0;
       if (filter.value === 'today') return isToday(record.capturedAt);
       return true;
     });
