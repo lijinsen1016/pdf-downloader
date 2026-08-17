@@ -23,16 +23,31 @@ export default {
     scan: 'Scan page',
     history: 'Download history',
     captured: 'Captured',
-    pageLink: 'Page link'
+    pageLink: 'Page link',
+    captureOn: 'Collecting',
+    captureOff: 'Paused',
+    clearSearch: 'Clear search',
+    clearSelection: 'Clear selection',
+    retry: 'Retry',
+    downloadCurrent: 'Download results',
+    downloadSelected: 'Download selected'
   },
   filter: {
     all: 'All',
     auth: 'Login required',
     today: 'Today'
   },
+  time: {
+    now: 'Just now',
+    today: 'Today',
+    earlier: 'Earlier'
+  },
   status: {
     kept: 'Captured {count}',
     showing: 'Showing {count}',
+    capturing: 'Capturing',
+    paused: 'Paused',
+    selected: '{count} selected',
     queued: 'Queued',
     fetching: 'Fetching',
     starting: 'Starting',
@@ -44,7 +59,8 @@ export default {
   message: {
     noRecords: 'No PDF records yet',
     noMatch: 'No matching PDF files',
-    emptyHint: 'Open or preview a PDF in a page and it will show up here automatically.',
+    emptyHint: 'Open or preview a PDF in a page and it will show up here automatically. You can also scan the current page.',
+    noMatchHint: 'Try another keyword or clear the search.',
     downloadSuccess: 'Download started',
     downloadFailed: 'Download failed',
     downloadInterrupted: 'Download interrupted or canceled',

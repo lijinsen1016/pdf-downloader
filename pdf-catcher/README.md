@@ -9,6 +9,7 @@ A Chrome MV3 extension that captures PDF documents from web requests and downloa
 - Cookie-auth and Bearer-auth PDFs use an offscreen document fetch fallback and are verified to still be `application/pdf` before saving.
 - Records are stored in `chrome.storage.session`; cookie values and full request headers are never persisted. Authorization headers can be reused only when explicitly enabled, and are stored in session memory only.
 - v2 adds on-demand page link scanning, optional download history, a side panel, a keyboard shortcut (`Alt+Shift+P`), and temporary DNR authorization navigation for opening bearer-auth PDFs.
+- v0.3 rebuilds the popup/side panel and options pages with an editorial paper-and-ink visual system: grouped record timeline, batch selection bar, empty-state scan CTA, inline job progress, and icon-based actions.
 
 ## Commands
 

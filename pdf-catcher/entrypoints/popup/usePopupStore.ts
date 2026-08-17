@@ -312,6 +312,14 @@ export function usePopupStore() {
     selectedIds.value = next;
   }
 
+  function clearSelection(): void {
+    selectedIds.value = new Set();
+  }
+
+  function clearSearch(): void {
+    searchText.value = '';
+  }
+
   function activeJobForRecord(recordId: string): DownloadJob | undefined {
     return jobs.value.find(
       (job) => job.recordId === recordId && ['queued', 'fetching', 'starting', 'downloading'].includes(job.status)
@@ -405,6 +413,8 @@ export function usePopupStore() {
     downloadRecord,
     downloadSelected,
     clearHistory,
+    clearSearch,
+    clearSelection,
     deleteHistoryItem,
     downloadTargetIds,
     errorForRecord,

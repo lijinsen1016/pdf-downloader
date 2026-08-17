@@ -2,12 +2,11 @@ body {
   width: 100%;
 }
 
-.shell {
-  width: 100%;
+.app-shell {
   min-height: 100vh;
   max-height: none;
 }
 
-.list {
+.content {
   min-height: 320px;
 }

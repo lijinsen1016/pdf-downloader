@@ -23,16 +23,31 @@ export default {
     scan: '扫描页面',
     history: '下载历史',
     captured: '已捕获',
-    pageLink: '页面链接'
+    pageLink: '页面链接',
+    captureOn: '收集中',
+    captureOff: '已暂停',
+    clearSearch: '清除搜索',
+    clearSelection: '取消选择',
+    retry: '重试',
+    downloadCurrent: '下载当前结果',
+    downloadSelected: '下载选中'
   },
   filter: {
     all: '全部',
     auth: '需登录',
     today: '今日'
   },
+  time: {
+    now: '刚刚',
+    today: '今天',
+    earlier: '更早'
+  },
   status: {
     kept: '已捕获 {count} 个',
     showing: '当前显示 {count} 个',
+    capturing: '正在捕获',
+    paused: '已暂停捕获',
+    selected: '已选择 {count} 项',
     queued: '排队中',
     fetching: '获取中',
     starting: '启动下载',
@@ -44,7 +59,8 @@ export default {
   message: {
     noRecords: '暂无 PDF 记录',
     noMatch: '没有匹配的 PDF',
-    emptyHint: '打开或预览网页中的 PDF 后，记录会自动出现在这里。',
+    emptyHint: '打开或预览网页中的 PDF 后，记录会自动出现在这里。也可以直接扫描当前页面。',
+    noMatchHint: '换一个关键词，或者清除搜索条件。',
     downloadSuccess: '下载已开始',
     downloadFailed: '下载失败',
     downloadInterrupted: '下载被中断或已取消',
