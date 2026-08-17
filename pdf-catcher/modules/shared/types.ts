@@ -1,0 +1,84 @@
+export type PdfConfidence = 'high' | 'medium';
+
+export interface PdfRecordAuth {
+  /** 请求时浏览器是否带有 Cookie */
+  cookie: boolean;
+  /** 例如 'Bearer'，不包含 token 值 */
+  bearerScheme?: string;
+  /** 仅当用户开启会话级复用且 token 已保存时存在 */
+  bearerTokenRef?: string;
+}
+
+export interface PdfRecord {
+  id: string;
+  url: string;
+  finalUrl?: string;
+  host: string;
+  fileName: string;
+  mime?: string;
+  size?: number;
+  capturedAt: number;
+  tabId?: number;
+  statusCode: number;
+  fromCache?: boolean;
+  partial?: boolean;
+  confidence: PdfConfidence;
+  auth: PdfRecordAuth;
+}
+
+export type DownloadJobStatus =
+  | 'queued'
+  | 'fetching'
+  | 'starting'
+  | 'downloading'
+  | 'done'
+  | 'failed'
+  | 'canceled';
+
+export interface DownloadJob {
+  id: string;
+  recordId: string;
+  url: string;
+  fileName: string;
+  status: DownloadJobStatus;
+  downloadId?: number;
+  blobUrl?: string;
+  errorKey?: string;
+  errorDetail?: string;
+  totalBytes?: number;
+  receivedBytes?: number;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export type Language = 'zh-CN' | 'en';
+
+export interface Settings {
+  captureEnabled: boolean;
+  language: Language;
+  retentionMinutes: number;
+  maxRecords: number;
+  reuseAuthorization: boolean;
+  ignoredHosts: string[];
+}
+
+export const DEFAULT_SETTINGS: Settings = {
+  captureEnabled: true,
+  language: 'zh-CN',
+  retentionMinutes: 30,
+  maxRecords: 200,
+  reuseAuthorization: false,
+  ignoredHosts: []
+};
+
+export const STORAGE_KEYS = {
+  records: 'records:v1',
+  settings: 'settings:v1',
+  jobs: 'downloadJobs:v1',
+  bearerTokens: 'bearerTokens:v1'
+} as const;
+
+export const MAX_PENDING_REQUESTS = 2000;
+export const PENDING_TTL_MS = 2 * 60 * 1000;
+export const MAX_CONCURRENT_DOWNLOADS = 3;
+export const OFFSCREEN_BLOB_LEASE_MS = 10 * 60 * 1000;

@@ -1,0 +1,13 @@
+{
+  "extends": "./.wxt/tsconfig.json",
+  "compilerOptions": {
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "moduleResolution": "Bundler",
+    "types": ["node"]
+  },
+  "include": ["**/*.ts", "**/*.vue"],
+  "exclude": ["node_modules", ".output", "dist"]
+}
