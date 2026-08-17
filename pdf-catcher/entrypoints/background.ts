@@ -1,11 +1,19 @@
 import { defineBackground } from 'wxt/utils/define-background';
 import { browser, type Browser } from 'wxt/browser';
 import { CaptureEngine } from '@/modules/capture/capture-engine';
+import { collectPdfLinks } from '@/modules/capture/page-scanner';
 import { DownloadManager } from '@/modules/downloads/download-manager';
 import { popupToBackgroundSchema, safeParse, type PortEvent } from '@/modules/protocol/schemas';
+import {
+  addHistoryItem,
+  clearHistory,
+  deleteHistoryItem,
+  loadHistory
+} from '@/modules/storage/history-repo';
 import { getSettings, saveSettings, subscribeSettings } from '@/modules/storage/settings-repo';
 import { loadTokens } from '@/modules/storage/token-repo';
 import { DEFAULT_SETTINGS, type Settings } from '@/modules/shared/types';
+import { getHost } from '@/modules/shared/url';
 
 export default defineBackground(() => {
   const ports = new Set<Browser.runtime.Port>();
@@ -32,8 +40,37 @@ export default defineBackground(() => {
     getSettings: () => settings,
     getRecords: () => engine.getRecords(),
     getToken: async (ref) => (await loadTokens())[ref],
-    broadcast
+    broadcast,
+    onDownloadCompleted: async (job) => {
+      if (!settings.historyEnabled) return;
+      const history = await addHistoryItem({
+        id: crypto.randomUUID(),
+        fileName: job.fileName,
+        url: job.url,
+        host: getHost(job.url),
+        size: job.totalBytes,
+        downloadedAt: Date.now(),
+        jobId: job.id,
+        recordId: job.recordId
+      });
+      broadcast({ type: 'history/changed', history });
+    }
   });
+
+  async function scanActiveTab(): Promise<number> {
+    const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
+    if (!tab?.id) {
+      throw new Error('message.noActiveTab');
+    }
+
+    const injections = await browser.scripting.executeScript({
+      target: { tabId: tab.id },
+      func: collectPdfLinks
+    });
+
+    const links = injections.flatMap((injection) => injection.result ?? []);
+    return engine.addDomRecords(links, tab.id);
+  }
 
   async function applySettings(patch: Partial<Settings>): Promise<Settings> {
     const next = await saveSettings(patch);
@@ -70,6 +107,7 @@ export default defineBackground(() => {
               ok: true,
               records: engine.getRecords(),
               jobs: downloadManager.getJobs(),
+              history: await loadHistory(),
               settings
             });
             return;
@@ -113,6 +151,27 @@ export default defineBackground(() => {
             sendResponse({ ok: true, settings: next });
             return;
           }
+          case 'page/scan': {
+            const count = await scanActiveTab();
+            sendResponse({ ok: true, count });
+            return;
+          }
+          case 'history/get': {
+            sendResponse({ ok: true, history: await loadHistory() });
+            return;
+          }
+          case 'history/delete': {
+            const history = await deleteHistoryItem(request.id);
+            broadcast({ type: 'history/changed', history });
+            sendResponse({ ok: true, history });
+            return;
+          }
+          case 'history/clear': {
+            const history = await clearHistory();
+            broadcast({ type: 'history/changed', history });
+            sendResponse({ ok: true, history });
+            return;
+          }
         }
       } catch (error) {
         sendResponse({
@@ -124,6 +183,11 @@ export default defineBackground(() => {
     })();
 
     return true;
+  });
+
+  browser.commands.onCommand.addListener((command) => {
+    if (command !== 'scan-page') return;
+    void scanActiveTab().catch(() => undefined);
   });
 
   const backgroundReady = (async () => {

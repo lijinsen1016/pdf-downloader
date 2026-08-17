@@ -5,6 +5,7 @@ import { setLanguage } from '@/modules/i18n';
 import type { PortEvent, PopupToBackground } from '@/modules/protocol/schemas';
 import {
   DEFAULT_SETTINGS,
+  type DownloadHistoryItem,
   type DownloadJob,
   type PdfRecord,
   type Settings
@@ -23,7 +24,9 @@ export function usePopupStore() {
 
   const records = ref<PdfRecord[]>([]);
   const jobs = ref<DownloadJob[]>([]);
+  const history = ref<DownloadHistoryItem[]>([]);
   const settings = ref<Settings>({ ...DEFAULT_SETTINGS });
+  const view = ref<'capture' | 'history'>('capture');
   const loading = ref(true);
   const searchText = ref('');
   const filter = ref<RecordFilter>('all');
@@ -53,6 +56,18 @@ export function usePopupStore() {
   const selectedVisibleIds = computed(() => {
     const filteredIds = new Set(filteredRecords.value.map((record) => record.id));
     return [...selectedIds.value].filter((id) => filteredIds.has(id));
+  });
+
+  const filteredHistory = computed(() => {
+    const keyword = searchText.value.trim().toLowerCase();
+    return history.value.filter((item) => {
+      return (
+        !keyword ||
+        item.fileName.toLowerCase().includes(keyword) ||
+        item.url.toLowerCase().includes(keyword) ||
+        item.host.toLowerCase().includes(keyword)
+      );
+    });
   });
 
   const downloadTargetIds = computed(() => {
@@ -107,6 +122,9 @@ export function usePopupStore() {
       case 'settings/changed':
         applySettings(event.settings);
         break;
+      case 'history/changed':
+        history.value = event.history;
+        break;
       case 'error':
         showToast(`${t(event.errorKey)}${event.detail ? `: ${event.detail}` : ''}`, 'error');
         break;
@@ -129,6 +147,7 @@ export function usePopupStore() {
       if (response.ok) {
         records.value = (response.records as PdfRecord[]) ?? [];
         jobs.value = (response.jobs as DownloadJob[]) ?? [];
+        history.value = (response.history as DownloadHistoryItem[]) ?? [];
         applySettings((response.settings as Settings) ?? settings.value);
       }
     } catch {
@@ -175,6 +194,14 @@ export function usePopupStore() {
     }
   }
 
+  async function openHistoryUrl(url: string): Promise<void> {
+    try {
+      await browser.tabs.create({ url, active: true });
+    } catch {
+      showToast(t('message.openFailed'), 'error');
+    }
+  }
+
   async function openRecord(id: string): Promise<void> {
     try {
       const response = await send({ type: 'records/open', id });
@@ -216,6 +243,38 @@ export function usePopupStore() {
         selectedIds.value = new Set();
         showToast(t('message.listCleared'));
       }
+    } catch {
+      showToast(t('message.requestFailed'), 'error');
+    }
+  }
+
+  async function scanActivePage(): Promise<void> {
+    try {
+      const response = await send({ type: 'page/scan' });
+      if (response.ok) {
+        const count = Number(response.count ?? 0);
+        showToast(count > 0 ? t('message.scanSuccess', { count }) : t('message.scanEmpty'), count > 0 ? 'success' : 'error');
+      } else {
+        showToast(t('message.scanFailed'), 'error');
+      }
+    } catch {
+      showToast(t('message.scanFailed'), 'error');
+    }
+  }
+
+  async function deleteHistoryItem(id: string): Promise<void> {
+    try {
+      const response = await send({ type: 'history/delete', id });
+      if (response.ok) history.value = (response.history as DownloadHistoryItem[]) ?? [];
+    } catch {
+      showToast(t('message.requestFailed'), 'error');
+    }
+  }
+
+  async function clearHistory(): Promise<void> {
+    try {
+      const response = await send({ type: 'history/clear' });
+      if (response.ok) history.value = (response.history as DownloadHistoryItem[]) ?? [];
     } catch {
       showToast(t('message.requestFailed'), 'error');
     }
@@ -268,6 +327,17 @@ export function usePopupStore() {
   function formatTime(timestamp: number): string {
     const locale = settings.value.language === 'zh-CN' ? 'zh-CN' : 'en-US';
     return new Date(timestamp).toLocaleString(locale, {
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit'
+    });
+  }
+
+  function formatHistoryTime(timestamp: number): string {
+    const locale = settings.value.language === 'zh-CN' ? 'zh-CN' : 'en-US';
+    return new Date(timestamp).toLocaleString(locale, {
+      year: 'numeric',
       month: '2-digit',
       day: '2-digit',
       hour: '2-digit',
@@ -334,26 +404,34 @@ export function usePopupStore() {
     deleteRecord,
     downloadRecord,
     downloadSelected,
+    clearHistory,
+    deleteHistoryItem,
     downloadTargetIds,
     errorForRecord,
     filter,
     filterOptions,
+    filteredHistory,
     filteredRecords,
+    formatHistoryTime,
     formatSize,
     formatTime,
+    history,
     jobForRecord,
     jobProgress,
     jobs,
     loading,
+    openHistoryUrl,
     progressForRecord,
     openOptions,
     openRecord,
     records,
+    scanActivePage,
     searchText,
     selectedIds,
     selectedVisibleIds,
     settings,
     showConfirm,
+    view,
     statusForRecord,
     statusLabel,
     toast,

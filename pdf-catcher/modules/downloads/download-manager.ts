@@ -8,6 +8,7 @@ import {
 } from '../shared/types';
 import type { PortEvent } from '../protocol/schemas';
 import { loadJobs, saveJobs } from '../storage/jobs-repo';
+import { openWithAuthorizationRule } from './auth-navigation';
 import {
   cancelFetchInOffscreen,
   closeOffscreenDocument,
@@ -20,6 +21,7 @@ export interface DownloadManagerDeps {
   getRecords: () => PdfRecord[];
   getToken: (ref: string) => Promise<string | undefined>;
   broadcast: (event: PortEvent) => void;
+  onDownloadCompleted?: (job: DownloadJob) => void | Promise<void>;
 }
 
 const ACTIVE_STATUSES = new Set(['queued', 'fetching', 'starting', 'downloading']);
@@ -114,7 +116,7 @@ export class DownloadManager {
     }
   }
 
-  async openRecord(recordId: string): Promise<{ url: string; usedBlob: boolean }> {
+  async openRecord(recordId: string): Promise<{ url: string; usedBlob: boolean; usedAuthRule?: boolean }> {
     const record = this.deps.getRecords().find((item) => item.id === recordId);
     if (!record) {
       throw new Error('record not found');
@@ -123,6 +125,13 @@ export class DownloadManager {
     if (record.auth.bearerScheme && record.auth.bearerTokenRef) {
       const token = await this.deps.getToken(record.auth.bearerTokenRef);
       if (token) {
+        try {
+          await openWithAuthorizationRule(record.url, token);
+          return { url: record.url, usedBlob: false, usedAuthRule: true };
+        } catch {
+          // DNR 不可用时回退到 offscreen blob 阅读页
+        }
+
         try {
           const blob = await fetchBlobInOffscreen({
             jobId: `open-${crypto.randomUUID()}`,
@@ -134,7 +143,7 @@ export class DownloadManager {
           await browser.tabs.create({ url: blob.blobUrl, active: true });
           return { url: blob.blobUrl, usedBlob: true };
         } catch {
-          // 回退到原始 URL，让用户通过网页会话打开
+          // 最后回退到原始 URL
         }
       }
     }
@@ -346,6 +355,9 @@ export class DownloadManager {
     }
 
     this.updateJob(job.id, patch);
+    if (state === 'complete') {
+      void this.deps.onDownloadCompleted?.(job);
+    }
     if (job.status === 'done' || job.status === 'failed' || job.status === 'canceled') {
       this.pump();
     }

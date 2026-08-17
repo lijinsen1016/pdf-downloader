@@ -34,6 +34,42 @@ export class CaptureEngine {
     return this.records;
   }
 
+  async addDomRecords(links: Array<{ url: string }>, tabId?: number): Promise<number> {
+    const now = Date.now();
+    let added = 0;
+
+    for (const link of links) {
+      if (!isHttpUrl(link.url)) continue;
+      const normalized = normalizeUrl(link.url);
+      const existingIndex = this.records.findIndex((record) => normalizeUrl(record.url) === normalized);
+      if (existingIndex >= 0) {
+        const existing = this.records[existingIndex];
+        if (existing?.source !== 'dom') continue;
+        this.records.splice(existingIndex, 1);
+      }
+
+      this.records.unshift({
+        id: crypto.randomUUID(),
+        url: link.url,
+        host: getHost(link.url),
+        fileName: buildFileName(link.url),
+        capturedAt: now,
+        tabId,
+        statusCode: 200,
+        confidence: 'medium',
+        auth: { cookie: false },
+        source: 'dom'
+      });
+      added += 1;
+    }
+
+    if (added > 0) {
+      this.records = trimRecords(this.records, this.deps.getSettings());
+      await this.persist();
+    }
+    return added;
+  }
+
   async deleteRecord(id: string): Promise<PdfRecord[]> {
     this.records = this.records.filter((record) => record.id !== id);
     await deleteTokens([id]);
@@ -193,7 +229,8 @@ export class CaptureEngine {
       fromCache: pending.response?.fromCache,
       partial: statusCode === 206,
       confidence: verdict.confidence,
-      auth
+      auth,
+      source: 'network'
     };
 
     this.upsertRecord(record);

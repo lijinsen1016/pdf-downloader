@@ -19,7 +19,11 @@ export default {
     language: 'Language',
     capture: 'Capture',
     options: 'Options',
-    filter: 'Filter records'
+    filter: 'Filter records',
+    scan: 'Scan page',
+    history: 'Download history',
+    captured: 'Captured',
+    pageLink: 'Page link'
   },
   filter: {
     all: 'All',
@@ -57,7 +61,13 @@ export default {
     unknownError: 'Unknown error',
     captureOff: 'Capture is off. Enable it in settings.',
     loginRequired: 'Login required for this PDF',
-    sessionOnly: 'Login valid for this browser session only'
+    sessionOnly: 'Login valid for this browser session only',
+    scanSuccess: 'Found {count} PDF links on this page',
+    scanEmpty: 'No PDF links found on this page',
+    scanFailed: 'Failed to scan current page',
+    historyEmpty: 'No download history yet',
+    historyHint: 'Enable download history in settings and successfully downloaded PDFs will appear here.',
+    historyDisabled: 'Download history is disabled'
   },
   options: {
     title: 'PDF Catcher Settings',
@@ -78,6 +88,10 @@ export default {
     clearAllHint: 'Also removes queued downloads and session credentials.',
     saved: 'Settings saved',
     save: 'Save settings',
-    privacyNote: 'Cookie values, Set-Cookie headers, and full request headers are never saved. Authorization is only kept in session memory when you enable reuse.'
+    privacyNote: 'Cookie values, Set-Cookie headers, and full request headers are never saved. Authorization is only kept in session memory when you enable reuse.',
+    historyEnabled: 'Save download history',
+    historyEnabledHint: 'Only file name, URL, host and download time are saved. No credentials.',
+    clearHistory: 'Clear download history',
+    clearHistoryHint: 'Remove all saved download history items.'
   }
 };

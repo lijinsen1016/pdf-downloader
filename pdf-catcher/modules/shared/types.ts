@@ -24,6 +24,19 @@ export interface PdfRecord {
   partial?: boolean;
   confidence: PdfConfidence;
   auth: PdfRecordAuth;
+  /** network: 来自 webRequest 捕获；dom: 来自页面链接扫描 */
+  source?: 'network' | 'dom';
+}
+
+export interface DownloadHistoryItem {
+  id: string;
+  fileName: string;
+  url: string;
+  host: string;
+  size?: number;
+  downloadedAt: number;
+  jobId?: string;
+  recordId?: string;
 }
 
 export type DownloadJobStatus =
@@ -60,6 +73,8 @@ export interface Settings {
   maxRecords: number;
   reuseAuthorization: boolean;
   ignoredHosts: string[];
+  /** 下载历史默认关闭，仅保存脱敏后的文件名/URL/时间 */
+  historyEnabled: boolean;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -68,15 +83,19 @@ export const DEFAULT_SETTINGS: Settings = {
   retentionMinutes: 30,
   maxRecords: 200,
   reuseAuthorization: false,
-  ignoredHosts: []
+  ignoredHosts: [],
+  historyEnabled: false
 };
 
 export const STORAGE_KEYS = {
   records: 'records:v1',
   settings: 'settings:v1',
   jobs: 'downloadJobs:v1',
-  bearerTokens: 'bearerTokens:v1'
+  bearerTokens: 'bearerTokens:v1',
+  history: 'history:v1'
 } as const;
+
+export const MAX_HISTORY_ITEMS = 500;
 
 export const MAX_PENDING_REQUESTS = 2000;
 export const PENDING_TTL_MS = 2 * 60 * 1000;

@@ -41,6 +41,7 @@ async function save(): Promise<void> {
       retentionMinutes: Number(form.value.retentionMinutes),
       maxRecords: Number(form.value.maxRecords),
       reuseAuthorization: form.value.reuseAuthorization,
+      historyEnabled: form.value.historyEnabled,
       ignoredHosts: ignoredHostsText.value
         .split('\n')
         .map((host) => host.trim())
@@ -68,6 +69,15 @@ async function clearAll(): Promise<void> {
     await send({ type: 'records/clear' });
   } finally {
     clearing.value = false;
+  }
+}
+
+async function clearHistory(): Promise<void> {
+  if (!window.confirm(t('options.clearHistoryHint'))) return;
+  try {
+    await send({ type: 'history/clear' });
+  } finally {
+    // 列表由 popup 自行刷新
   }
 }
 
@@ -127,6 +137,14 @@ onMounted(load);
         <input v-model="form.reuseAuthorization" type="checkbox" />
       </label>
 
+      <label class="row">
+        <div>
+          <strong>{{ t('options.historyEnabled') }}</strong>
+          <p>{{ t('options.historyEnabledHint') }}</p>
+        </div>
+        <input v-model="form.historyEnabled" type="checkbox" />
+      </label>
+
       <label class="field">
         <span>{{ t('options.ignoredHosts') }}</span>
         <textarea v-model="ignoredHostsText" rows="4" :placeholder="'example.com\n*.example.com'"></textarea>
@@ -146,6 +164,19 @@ onMounted(load);
         </button>
       </div>
       <p class="privacy-note">🛡 {{ t('options.privacyNote') }}</p>
+    </section>
+
+    <section class="card">
+      <h2>{{ t('app.history') }}</h2>
+      <div class="row">
+        <div>
+          <strong>{{ t('options.clearHistory') }}</strong>
+          <p>{{ t('options.clearHistoryHint') }}</p>
+        </div>
+        <button class="danger-button" type="button" @click="clearHistory">
+          {{ t('options.clearHistory') }}
+        </button>
+      </div>
     </section>
 
     <footer class="page-footer">

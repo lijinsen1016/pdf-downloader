@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import type { PdfRecord, DownloadJob, Settings } from '../shared/types';
+import type { DownloadHistoryItem, DownloadJob, PdfRecord, Settings } from '../shared/types';
 
 export const pdfRecordAuthSchema = z.object({
   cookie: z.boolean(),
@@ -21,7 +21,19 @@ export const pdfRecordSchema = z.object({
   fromCache: z.boolean().optional(),
   partial: z.boolean().optional(),
   confidence: z.enum(['high', 'medium']),
-  auth: pdfRecordAuthSchema
+  auth: pdfRecordAuthSchema,
+  source: z.enum(['network', 'dom']).optional()
+});
+
+export const historyItemSchema = z.object({
+  id: z.string(),
+  fileName: z.string(),
+  url: z.string(),
+  host: z.string(),
+  size: z.number().nonnegative().optional(),
+  downloadedAt: z.number(),
+  jobId: z.string().optional(),
+  recordId: z.string().optional()
 });
 
 export const downloadJobSchema = z.object({
@@ -46,7 +58,8 @@ export const settingsSchema = z.object({
   retentionMinutes: z.number().int().min(1).max(60 * 24 * 30),
   maxRecords: z.number().int().min(10).max(2000),
   reuseAuthorization: z.boolean(),
-  ignoredHosts: z.array(z.string())
+  ignoredHosts: z.array(z.string()),
+  historyEnabled: z.boolean().default(false)
 });
 
 export type ParsedPdfRecord = z.infer<typeof pdfRecordSchema>;
@@ -85,6 +98,19 @@ export const popupToBackgroundSchema = z.discriminatedUnion('type', [
   z.object({
     type: z.literal('settings/update'),
     patch: settingsSchema.partial()
+  }),
+  z.object({
+    type: z.literal('page/scan')
+  }),
+  z.object({
+    type: z.literal('history/get')
+  }),
+  z.object({
+    type: z.literal('history/delete'),
+    id: z.string()
+  }),
+  z.object({
+    type: z.literal('history/clear')
   })
 ]);
 
@@ -123,6 +149,7 @@ export type OffscreenDocumentMessage = z.infer<typeof offscreenToDocumentSchema>
 export type SnapshotState = {
   records: PdfRecord[];
   jobs: DownloadJob[];
+  history: DownloadHistoryItem[];
   settings: Settings;
 };
 
@@ -130,6 +157,7 @@ export type PortEvent =
   | { type: 'records/changed'; records: PdfRecord[] }
   | { type: 'jobs/changed'; jobs: DownloadJob[] }
   | { type: 'settings/changed'; settings: Settings }
+  | { type: 'history/changed'; history: DownloadHistoryItem[] }
   | { type: 'error'; errorKey: string; detail?: string };
 
 export function safeParse<T>(schema: z.ZodType<T>, value: unknown): T | undefined {

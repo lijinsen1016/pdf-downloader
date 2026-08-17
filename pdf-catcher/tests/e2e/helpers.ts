@@ -36,8 +36,12 @@ export function buildPdf(title = 'PDF Catcher Test'): Buffer {
 
 export async function startPdfServer(): Promise<TestServer> {
   const pdf = buildPdf();
+  let lastAuthorization = '';
   const server = createServer((req, res) => {
     const requestUrl = new URL(req.url ?? '/', 'http://127.0.0.1');
+    if (requestUrl.pathname === '/bearer.pdf') {
+      lastAuthorization = req.headers.authorization ?? '';
+    }
     const send = (status: number, contentType: string, body: Buffer | string) => {
       res.writeHead(status, {
         'content-type': contentType,
@@ -49,6 +53,21 @@ export async function startPdfServer(): Promise<TestServer> {
 
     if (requestUrl.pathname === '/') {
       send(200, 'text/html; charset=utf-8', '<html><body>pdf catcher test home</body></html>');
+      return;
+    }
+
+    if (requestUrl.pathname === '/scan.html') {
+      send(
+        200,
+        'text/html; charset=utf-8',
+        '<html><body><a href="/file.pdf">file</a><a href="/stream?id=1">stream</a><a href="/no-pdf">none</a></body></html>'
+      );
+      return;
+    }
+
+    if (requestUrl.pathname === '/last-auth') {
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ authorization: lastAuthorization }));
       return;
     }
 
@@ -156,10 +175,12 @@ export async function getState(popup: Page): Promise<{
     url: string;
     fileName: string;
     confidence: string;
+    source?: string;
     auth: { cookie: boolean; bearerScheme?: string; bearerTokenRef?: string };
   }>;
   jobs: Array<{ id: string; recordId: string; status: string; errorDetail?: string }>;
-  settings: { captureEnabled: boolean };
+  history: Array<{ id: string; url: string; fileName: string; downloadedAt: number }>;
+  settings: { captureEnabled: boolean; historyEnabled: boolean };
 }> {
   return popup.evaluate(async () => {
     const chromeRef = (globalThis as unknown as {

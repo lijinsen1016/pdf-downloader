@@ -19,7 +19,11 @@ export default {
     language: '界面语言',
     capture: '捕获开关',
     options: '详细设置',
-    filter: '筛选记录'
+    filter: '筛选记录',
+    scan: '扫描页面',
+    history: '下载历史',
+    captured: '已捕获',
+    pageLink: '页面链接'
   },
   filter: {
     all: '全部',
@@ -57,7 +61,13 @@ export default {
     unknownError: '未知错误',
     captureOff: '捕获已关闭，可在设置中重新开启',
     loginRequired: '该 PDF 需要登录',
-    sessionOnly: '登录态仅本次会话有效'
+    sessionOnly: '登录态仅本次会话有效',
+    scanSuccess: '已从页面找到 {count} 个 PDF 链接',
+    scanEmpty: '当前页面没有找到 PDF 链接',
+    scanFailed: '扫描当前页面失败',
+    historyEmpty: '暂无下载历史',
+    historyHint: '在设置中开启下载历史后，成功下载的 PDF 会记录在这里。',
+    historyDisabled: '下载历史未开启'
   },
   options: {
     title: 'PDF 捕手设置',
@@ -78,6 +88,10 @@ export default {
     clearAllHint: '同时删除会话中保存的下载任务和登录凭证。',
     saved: '设置已保存',
     save: '保存设置',
-    privacyNote: 'Cookie 值、Set-Cookie 和完整请求头不会被保存。Authorization 仅在您开启复用时保存于会话内存。'
+    privacyNote: 'Cookie 值、Set-Cookie 和完整请求头不会被保存。Authorization 仅在您开启复用时保存于会话内存。',
+    historyEnabled: '保存下载历史',
+    historyEnabledHint: '仅保存文件名、URL、站点和下载时间，不保存登录信息。',
+    clearHistory: '清空下载历史',
+    clearHistoryHint: '删除全部已保存的下载历史。'
   }
 };
