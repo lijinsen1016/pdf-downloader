@@ -3,7 +3,19 @@ import { safeParse, offscreenToDocumentSchema } from '@/modules/protocol/schemas
 import { looksLikePdfFileName } from '@/modules/shared/file-name';
 import { hasPdfMagic, isPdfContentType } from '@/modules/shared/pdf-signature';
 import { parseContentDisposition } from '@/modules/shared/content-disposition';
+import type { OffscreenErrorCode } from '@/modules/downloads/offscreen-errors';
 import type { StoredPostBody } from '@/modules/storage/post-body-repo';
+
+/** 带错误类别的响应失败，供 background 区分「不是 PDF」与「传输失败」。 */
+class OffscreenResponseError extends Error {
+  constructor(
+    message: string,
+    public readonly errorCode: OffscreenErrorCode
+  ) {
+    super(message);
+    this.name = 'OffscreenResponseError';
+  }
+}
 
 const controllers = new Map<string, AbortController>();
 const blobUrls = new Set<string>();
@@ -73,7 +85,7 @@ async function fetchPdfBlob(message: {
     });
 
     if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`);
+      throw new OffscreenResponseError(`HTTP ${response.status}`, 'http');
     }
 
     const contentType = response.headers.get('content-type') ?? '';
@@ -85,12 +97,12 @@ async function fetchPdfBlob(message: {
     const magicOk = hasPdfMagic(head);
 
     if (!magicOk && !isPdfContentType(contentType) && !looksLikePdfFileName(dispositionName)) {
-      throw new Error('response is not a PDF');
+      throw new OffscreenResponseError('response is not a PDF', 'not-pdf');
     }
     // 仅凭 URL 后缀推断出来的记录（requirePdfMagic）必须靠魔数确认，
     // 否则会把返回 HTML 的 *.pdf 当成 PDF 下载下来。
     if (!magicOk && message.requirePdfMagic) {
-      throw new Error('response is not a PDF');
+      throw new OffscreenResponseError('response is not a PDF', 'not-pdf');
     }
 
     const blobUrl = URL.createObjectURL(blob);
@@ -137,7 +149,8 @@ browser.runtime.onMessage.addListener((message: unknown, _sender, sendResponse) 
     .catch((error: unknown) => {
       sendResponse({
         ok: false,
-        error: error instanceof Error ? error.message : String(error)
+        error: error instanceof Error ? error.message : String(error),
+        errorCode: error instanceof OffscreenResponseError ? error.errorCode : 'network'
       });
     });
   return true;

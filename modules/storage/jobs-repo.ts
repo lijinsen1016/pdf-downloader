@@ -1,6 +1,7 @@
 import { browser } from 'wxt/browser';
 import { STORAGE_KEYS, type DownloadJob } from '../shared/types';
 import { downloadJobSchema } from '../protocol/schemas';
+import { normalizeJobSize } from '../downloads/download-delta';
 
 const JOB_KEEP_MS = 60 * 60 * 1000;
 
@@ -11,7 +12,7 @@ export async function loadJobs(): Promise<DownloadJob[]> {
   return value
     .map((item) => downloadJobSchema.safeParse(item))
     .filter((parsed) => parsed.success)
-    .map((parsed) => parsed.data as DownloadJob);
+    .map((parsed) => normalizeJobSize(parsed.data as DownloadJob));
 }
 
 export function pruneJobs(jobs: DownloadJob[]): DownloadJob[] {

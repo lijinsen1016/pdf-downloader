@@ -59,6 +59,7 @@ export default {
     noMatchHint: 'Try another keyword or clear the search.',
     downloadSuccess: 'Download started',
     downloadFailed: 'Download failed',
+    notPdf: 'Response is not a PDF, download skipped',
     downloadInterrupted: 'Download interrupted or canceled',
     recordNotFound: 'Record not found or expired',
     authReuseDisabled: 'This PDF requires request-header auth, but session reuse is disabled',

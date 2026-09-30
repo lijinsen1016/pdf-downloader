@@ -9,9 +9,11 @@ import type { PortEvent } from '../protocol/schemas';
 import { loadPostBody } from '../storage/post-body-repo';
 import { openWithAuthorizationRule } from './auth-navigation';
 import { BlobLeaseManager } from './blob-leases';
-import { applyDownloadDelta } from './download-delta';
-import { isActiveStatus, isTerminalStatus, JobQueue } from './job-queue';
+import { applyDownloadDelta, normalizeByteCount } from './download-delta';
+import { JobQueue } from './job-queue';
+import { isActiveStatus, isTerminalStatus } from './job-status';
 import { fetchBlobInOffscreen, cancelFetchInOffscreen } from './offscreen-client';
+import { isPdfVerificationError } from './offscreen-errors';
 import {
   runDirectDownload,
   runOffscreenDownload,
@@ -54,7 +56,6 @@ export class DownloadManager {
     this.transportCtx = {
       getJob: (jobId) => this.queue.find(jobId),
       updateJob: (jobId, patch) => this.queue.update(jobId, patch),
-      releaseBlob: (jobId) => this.releaseBlob(jobId),
       leases: this.leases
     };
   }
@@ -122,8 +123,14 @@ export class DownloadManager {
     await this.queue.clear();
   }
 
-  /** 删除单条记录时使用：丢弃其任务，避免残留指向已删除记录。 */
-  dropJobsForRecord(recordId: string): void {
+  /** 删除单条记录时使用：先取消其活动任务，再丢弃，避免下载在记录消失后继续跑完。 */
+  async dropJobsForRecord(recordId: string): Promise<void> {
+    const active = this.queue
+      .list()
+      .filter((job) => job.recordId === recordId && isActiveStatus(job.status));
+    for (const job of active) {
+      await this.cancelJob(job.id);
+    }
     this.queue.removeJobsForRecord(recordId);
   }
 
@@ -264,6 +271,12 @@ export class DownloadManager {
     } catch (error) {
       if (this.queue.isCanceled(job.id)) return;
 
+      // 内容校验失败说明取回的确实不是 PDF：退回直连只会把 HTML/JSON 存成 .pdf
+      if (isPdfVerificationError(error)) {
+        this.failJob(job, 'message.notPdf', error);
+        return;
+      }
+
       if (!allowDirectFallback) {
         this.failJob(job, 'message.downloadFailed', error);
         return;
@@ -338,10 +351,11 @@ export class DownloadManager {
           continue;
         }
         if (item.state === 'complete') {
+          const fileSize = normalizeByteCount(item.fileSize);
           this.queue.update(job.id, {
             status: 'done',
-            receivedBytes: item.fileSize,
-            totalBytes: item.totalBytes || item.fileSize
+            receivedBytes: fileSize,
+            totalBytes: normalizeByteCount(item.totalBytes) ?? fileSize
           });
           this.releaseBlob(job.id);
         } else if (item.state === 'interrupted') {
@@ -353,8 +367,8 @@ export class DownloadManager {
         } else {
           this.queue.update(job.id, {
             status: 'downloading',
-            receivedBytes: item.bytesReceived,
-            totalBytes: item.totalBytes
+            receivedBytes: normalizeByteCount(item.bytesReceived),
+            totalBytes: normalizeByteCount(item.totalBytes)
           });
         }
       } catch {
@@ -377,20 +391,25 @@ export class DownloadManager {
     }
 
     try {
-      const [item] = await browser.downloads.search({
+      const candidates = await browser.downloads.search({
         filenameRegex: `${escapeRegExp(job.fileName)}$`,
         startedAfter: new Date(job.createdAt - 5000).toISOString(),
-        limit: 1,
+        limit: 5,
         orderBy: ['-startTime']
       });
+      // 只认领文件名完全一致、且落在本次任务时间窗内的条目，避免误领同名下载
+      const item = candidates.find(
+        (candidate) => candidate.id !== undefined && basenameOf(candidate.filename) === job.fileName
+      );
       if (!item?.id) return false;
 
       if (item.state === 'complete') {
+        const fileSize = normalizeByteCount(item.fileSize);
         this.queue.update(job.id, {
           status: 'done',
           downloadId: item.id,
-          receivedBytes: item.fileSize,
-          totalBytes: item.totalBytes || item.fileSize
+          receivedBytes: fileSize,
+          totalBytes: normalizeByteCount(item.totalBytes) ?? fileSize
         });
       } else if (item.state === 'interrupted') {
         this.queue.update(job.id, {
@@ -406,4 +425,9 @@ export class DownloadManager {
       return false;
     }
   }
+}
+
+function basenameOf(filePath: string): string {
+  const segments = filePath.split(/[\\/]/);
+  return segments[segments.length - 1] ?? filePath;
 }

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Browser } from 'wxt/browser';
-import { applyDownloadDelta } from '@/modules/downloads/download-delta';
+import { applyDownloadDelta, normalizeJobSize } from '@/modules/downloads/download-delta';
 import type { DownloadJob } from '@/modules/shared/types';
 
 function job(patch: Partial<DownloadJob> = {}): DownloadJob {
@@ -50,6 +50,23 @@ describe('applyDownloadDelta', () => {
       delta({ state: { current: 'complete' }, totalBytes: { current: 4096 }, fileSize: { current: -1 } })
     );
     expect(result.patch).toMatchObject({ status: 'done', totalBytes: 4096, receivedBytes: 4096 });
+  });
+
+  it('never writes negative byte counts into the job', () => {
+    const result = applyDownloadDelta(
+      job(),
+      delta({ totalBytes: { current: -1 }, fileSize: { current: -1 } })
+    );
+    expect(result.patch).toEqual({});
+  });
+
+  it('normalizes legacy -1 sizes when loading jobs', () => {
+    const normalized = normalizeJobSize(job({ totalBytes: -1, receivedBytes: -1 }));
+    expect(normalized.totalBytes).toBeUndefined();
+    expect(normalized.receivedBytes).toBeUndefined();
+
+    const kept = normalizeJobSize(job({ totalBytes: 10, receivedBytes: 5 }));
+    expect(kept).toMatchObject({ totalBytes: 10, receivedBytes: 5 });
   });
 
   it('marks interrupted jobs as failed with a translatable error key', () => {

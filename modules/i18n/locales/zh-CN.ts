@@ -59,6 +59,7 @@ export default {
     noMatchHint: '换一个关键词，或者清除搜索条件。',
     downloadSuccess: '下载已开始',
     downloadFailed: '下载失败',
+    notPdf: '响应内容不是 PDF，已跳过下载',
     downloadInterrupted: '下载被中断或已取消',
     recordNotFound: '记录不存在或已过期',
     authReuseDisabled: '该 PDF 需要请求头鉴权，但会话级复用未开启',

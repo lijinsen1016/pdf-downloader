@@ -9,6 +9,20 @@ export interface DownloadDeltaResult {
   completed: boolean;
 }
 
+/** Chrome 在大小未知时上报 -1，这类值不能进入任务字段（会破坏响应 schema 校验）。 */
+export function normalizeByteCount(value: number | undefined): number | undefined {
+  return value !== undefined && value >= 0 ? value : undefined;
+}
+
+/** 把已持久化任务里的 -1 归一化为 undefined。 */
+export function normalizeJobSize(job: DownloadJob): DownloadJob {
+  return {
+    ...job,
+    totalBytes: normalizeByteCount(job.totalBytes),
+    receivedBytes: normalizeByteCount(job.receivedBytes)
+  };
+}
+
 /**
  * 把 chrome.downloads 的 delta 转换成任务补丁（纯函数，便于单测）。
  *
@@ -21,14 +35,15 @@ export function applyDownloadDelta(
 ): DownloadDeltaResult {
   const patch: Partial<DownloadJob> = {};
 
-  if (delta.totalBytes?.current !== undefined) {
-    patch.totalBytes = delta.totalBytes.current;
+  const received = normalizeByteCount(delta.totalBytes?.current);
+  if (received !== undefined) {
+    patch.totalBytes = received;
   }
   // fileSize 是已知的最终文件大小（chunked 响应未结束时 Chrome 会上报 -1）。
-  // 完成事件通常与它同一条 delta 到达，因此不能再用 job.status === 'done' 作前提。
-  if (delta.fileSize?.current !== undefined && delta.fileSize.current > 0) {
-    patch.totalBytes = delta.fileSize.current;
-    patch.receivedBytes = delta.fileSize.current;
+  const fileSize = normalizeByteCount(delta.fileSize?.current);
+  if (fileSize !== undefined && fileSize > 0) {
+    patch.totalBytes = fileSize;
+    patch.receivedBytes = fileSize;
   }
 
   const state = delta.state?.current;

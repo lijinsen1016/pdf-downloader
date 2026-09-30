@@ -1,24 +1,8 @@
 import { browser } from 'wxt/browser';
-import { MAX_CONCURRENT_DOWNLOADS, type DownloadJob, type DownloadJobStatus, type PdfRecord } from '../shared/types';
+import type { DownloadJob, PdfRecord } from '../shared/types';
 import type { PortEvent } from '../protocol/schemas';
 import { clearJobs, loadJobs, saveJobs } from '../storage/jobs-repo';
-
-const ACTIVE_STATUSES = new Set<DownloadJobStatus>([
-  'queued',
-  'fetching',
-  'starting',
-  'downloading'
-]);
-
-const TERMINAL_STATUSES = new Set<DownloadJobStatus>(['done', 'failed', 'canceled']);
-
-export function isActiveStatus(status: DownloadJobStatus): boolean {
-  return ACTIVE_STATUSES.has(status);
-}
-
-export function isTerminalStatus(status: DownloadJobStatus): boolean {
-  return TERMINAL_STATUSES.has(status);
-}
+import { isActiveStatus, selectJobsToStart } from './job-status';
 
 export interface JobQueueDeps {
   /** 队列把任务交给执行器；执行器负责真正发起下载。 */
@@ -101,21 +85,17 @@ export class JobQueue {
   }
 
   /**
-   * 填满并发额度。任务在这里同步标记为 fetching 占位，
-   * 否则同一批 queued 任务会被重复调度成多个下载。
+   * 填满并发额度。并发判断只看「执行中」状态，queued 不计入；
+   * 任务在交给执行器前同步标记为 fetching 占位，避免被重复调度。
    */
   pump(): void {
-    for (let index = 0; index < MAX_CONCURRENT_DOWNLOADS * 2; index += 1) {
-      if (this.activeCount() >= MAX_CONCURRENT_DOWNLOADS) break;
-      const next = this.jobs.find((job) => job.status === 'queued');
-      if (!next) break;
-
-      next.status = 'fetching';
-      next.updatedAt = Date.now();
+    for (const job of selectJobsToStart(this.jobs)) {
+      job.status = 'fetching';
+      job.updatedAt = Date.now();
       try {
-        this.deps.onJobReady(next);
+        this.deps.onJobReady(job);
       } catch (error) {
-        this.update(next.id, {
+        this.update(job.id, {
           status: 'failed',
           errorKey: 'message.downloadFailed',
           errorDetail: error instanceof Error ? error.message : String(error)

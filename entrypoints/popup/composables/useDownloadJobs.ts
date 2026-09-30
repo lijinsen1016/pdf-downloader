@@ -1,7 +1,7 @@
 import { computed, ref } from 'vue';
 import type { ComposerTranslation } from 'vue-i18n';
 import { request } from '@/modules/protocol/client';
-import { isActiveStatus } from '@/modules/downloads/job-queue';
+import { isActiveStatus } from '@/modules/downloads/job-status';
 import { UI_MAX_ACTIVE_JOBS, type DownloadJob } from '@/modules/shared/types';
 import { describeError } from '@/modules/protocol/errors';
 

@@ -100,6 +100,18 @@ export async function startPdfServer(): Promise<TestServer> {
       return;
     }
 
+    // .pdf 后缀 + octet-stream，但内容其实是 HTML：用于验证魔数校验不会退回直连下载
+    if (requestUrl.pathname === '/fake-octet.pdf') {
+      send(200, 'application/octet-stream', '<html><body>not a pdf</body></html>');
+      return;
+    }
+
+    // 批量下载用例：/batch-1.pdf ... /batch-N.pdf
+    if (/^\/batch-\d+\.pdf$/.test(requestUrl.pathname)) {
+      send(200, 'application/pdf', pdf);
+      return;
+    }
+
     if (requestUrl.pathname === '/cookie.pdf') {
       const hasCookie = Boolean(req.headers.cookie?.includes('auth=1'));
       if (hasCookie) send(200, 'application/pdf', pdf);
@@ -216,7 +228,13 @@ export async function getState(popup: Page): Promise<{
       bearerTokenRef?: string;
     };
   }>;
-  jobs: Array<{ id: string; recordId: string; status: string; errorDetail?: string }>;
+  jobs: Array<{
+    id: string;
+    recordId: string;
+    status: string;
+    errorKey?: string;
+    errorDetail?: string;
+  }>;
   history: Array<{ id: string; url: string; fileName: string; downloadedAt: number }>;
   settings: { captureEnabled: boolean; historyEnabled: boolean };
 }> {

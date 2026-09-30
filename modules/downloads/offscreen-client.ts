@@ -1,6 +1,7 @@
 import { browser } from 'wxt/browser';
 import { offscreenBlobResponseSchema } from '@/modules/protocol/schemas';
 import type { StoredPostBody } from '@/modules/storage/post-body-repo';
+import { OffscreenFetchError, toOffscreenError } from './offscreen-errors';
 
 const OFFSCREEN_PATH = '/offscreen.html';
 
@@ -61,10 +62,10 @@ export async function fetchBlobInOffscreen(params: {
   }
   const parsed = offscreenBlobResponseSchema.safeParse(response);
   if (!parsed.success) {
-    throw new Error('invalid offscreen response');
+    throw new OffscreenFetchError('invalid offscreen response', 'network');
   }
   if (!parsed.data.ok || !parsed.data.blobUrl) {
-    throw new Error(parsed.data.error || 'offscreen fetch failed');
+    throw toOffscreenError(parsed.data);
   }
   return {
     blobUrl: parsed.data.blobUrl,

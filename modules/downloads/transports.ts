@@ -7,8 +7,16 @@ import { fetchBlobInOffscreen, revokeBlobInOffscreen } from './offscreen-client'
 export interface TransportContext {
   getJob: (jobId: string) => DownloadJob | undefined;
   updateJob: (jobId: string, patch: Partial<DownloadJob>) => void;
-  releaseBlob: (jobId: string) => void;
   leases: BlobLeaseManager;
+}
+
+/**
+ * 任务被取消，或记录/任务已被清理时都必须中止：
+ * 只看 `status === 'canceled'` 会在任务被删除后失手，导致下载在记录消失后静默跑完。
+ */
+function isAborted(ctx: TransportContext, jobId: string): boolean {
+  const job = ctx.getJob(jobId);
+  return !job || job.status === 'canceled';
 }
 
 export function downloadTargetUrl(record: PdfRecord): string {
@@ -29,7 +37,7 @@ export async function runDirectDownload(
     saveAs: false
   });
 
-  if (ctx.getJob(job.id)?.status === 'canceled') {
+  if (isAborted(ctx, job.id)) {
     await browser.downloads.cancel(downloadId);
     return;
   }
@@ -65,7 +73,7 @@ export async function runOffscreenDownload(
     requirePdfMagic: options.requirePdfMagic
   });
 
-  if (ctx.getJob(job.id)?.status === 'canceled') {
+  if (isAborted(ctx, job.id)) {
     await revokeBlobInOffscreen(blob.blobUrl);
     return;
   }
@@ -80,15 +88,18 @@ export async function runOffscreenDownload(
       saveAs: false
     });
 
-    if (ctx.getJob(job.id)?.status === 'canceled') {
-      ctx.releaseBlob(job.id);
+    if (isAborted(ctx, job.id)) {
+      ctx.updateJob(job.id, { blobUrl: undefined });
+      ctx.leases.release(blob.blobUrl);
       await browser.downloads.cancel(downloadId);
       return;
     }
 
     ctx.updateJob(job.id, { status: 'downloading', downloadId });
   } catch (error) {
-    ctx.releaseBlob(job.id);
+    // 任务可能已被删除，租约必须按 URL 释放，不能依赖任务对象还在
+    ctx.updateJob(job.id, { blobUrl: undefined });
+    ctx.leases.release(blob.blobUrl);
     throw error;
   }
 }

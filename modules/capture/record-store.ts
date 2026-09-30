@@ -54,6 +54,7 @@ export class RecordStore {
         const existing = this.records[existingIndex];
         if (existing?.source !== 'dom') continue;
         this.records.splice(existingIndex, 1);
+        await this.dropExtras(existing ? [existing] : []);
       }
 
       this.records.unshift(buildDomRecord(link.url, tabId, now));
@@ -120,7 +121,13 @@ export class RecordStore {
     this.writeChain = this.writeChain
       .catch(() => undefined)
       .then(async () => {
-        await saveRecords(this.records);
+        const quotaDropped = await saveRecords(this.records);
+        if (quotaDropped.length) {
+          // 配额兜底截断掉的记录也必须清理会话凭证
+          const droppedIds = new Set(quotaDropped.map((record) => record.id));
+          this.records = this.records.filter((record) => !droppedIds.has(record.id));
+          await this.dropExtras(quotaDropped);
+        }
         this.deps.onChange(this.records);
       });
     return this.writeChain;

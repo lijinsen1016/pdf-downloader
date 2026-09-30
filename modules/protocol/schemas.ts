@@ -119,7 +119,8 @@ export const offscreenBlobResponseSchema = z.object({
   blobUrl: z.string().optional(),
   contentType: z.string().optional(),
   size: z.number().nonnegative().optional(),
-  error: z.string().optional()
+  error: z.string().optional(),
+  errorCode: z.enum(['not-pdf', 'http', 'network']).optional()
 });
 
 export const offscreenToDocumentSchema = z.discriminatedUnion('type', [

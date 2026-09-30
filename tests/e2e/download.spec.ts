@@ -140,3 +140,105 @@ test.describe('bearer auth downloads', () => {
     }
   });
 });
+
+test.describe('batch downloads', () => {
+  test('starts every queued job when the batch exceeds the concurrency limit', async () => {
+    const server = await startPdfServer();
+    const { context, extensionId } = await launchExtension(extensionPath);
+    const page = await context.newPage();
+
+    try {
+      await page.goto(`${server.url}/`);
+      await page.evaluate(async () => {
+        await Promise.all([
+          fetch('/batch-1.pdf'),
+          fetch('/batch-2.pdf'),
+          fetch('/batch-3.pdf'),
+          fetch('/batch-4.pdf')
+        ]);
+      });
+      await page.waitForTimeout(800);
+
+      const popup = await openPopup(context, extensionId);
+      const before = await waitForState(
+        popup,
+        (s) => s.records.filter((record) => record.url.includes('/batch-')).length === 4
+      );
+      const ids = before.records
+        .filter((record) => record.url.includes('/batch-'))
+        .map((record) => record.id);
+      expect(ids).toHaveLength(4);
+
+      await popup.evaluate(async (recordIds) => {
+        const chromeRef = (globalThis as unknown as {
+          chrome: { runtime: { sendMessage: (message: unknown) => Promise<unknown> } };
+        }).chrome;
+        await chromeRef.runtime.sendMessage({ type: 'download/start', ids: recordIds });
+      }, ids);
+
+      // 回归：并发判断误把 queued 计入时，>= 3 个排队任务一个都不会启动
+      const after = await waitForState(
+        popup,
+        (s) =>
+          ids.every((id) =>
+            s.jobs.some((job) => job.recordId === id && job.status === 'done')
+          ),
+        40_000
+      );
+
+      const statuses = ids.map(
+        (id) => after.jobs.find((job) => job.recordId === id)?.status
+      );
+      expect(statuses).toEqual(['done', 'done', 'done', 'done']);
+    } finally {
+      await context.close();
+      await server.close();
+    }
+  });
+});
+
+test.describe('pdf verification', () => {
+  test('fails instead of falling back to a direct download when the body is not a PDF', async () => {
+    const server = await startPdfServer();
+    const { context, extensionId } = await launchExtension(extensionPath);
+    const page = await context.newPage();
+
+    try {
+      await page.goto(`${server.url}/`);
+      await page.evaluate(async () => {
+        await fetch('/fake-octet.pdf');
+      });
+      await page.waitForTimeout(800);
+
+      const popup = await openPopup(context, extensionId);
+      const before = await waitForState(popup, (s) =>
+        s.records.some((record) => record.url.endsWith('/fake-octet.pdf'))
+      );
+      const record = before.records.find((item) => item.url.endsWith('/fake-octet.pdf'))!;
+      expect(record.confidence).toBe('medium');
+
+      await popup.evaluate(async (recordId) => {
+        const chromeRef = (globalThis as unknown as {
+          chrome: { runtime: { sendMessage: (message: unknown) => Promise<unknown> } };
+        }).chrome;
+        await chromeRef.runtime.sendMessage({ type: 'download/start', ids: [recordId] });
+      }, record.id);
+
+      const after = await waitForState(
+        popup,
+        (s) =>
+          s.jobs.some(
+            (job) => job.recordId === record.id && ['done', 'failed'].includes(job.status)
+          ),
+        25_000
+      );
+      const job = after.jobs.find((item) => item.recordId === record.id);
+      // 魔数校验失败必须终止任务，而不是回退直连把 HTML 存成 .pdf
+      expect(job?.status).toBe('failed');
+      expect(job?.errorKey).toBe('message.notPdf');
+    } finally {
+      await context.close();
+      await server.close();
+    }
+  });
+});

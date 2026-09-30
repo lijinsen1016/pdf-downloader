@@ -126,7 +126,7 @@ export default defineBackground(() => {
           }
           case 'records/delete': {
             const records = await engine.deleteRecord(request.id);
-            downloadManager.dropJobsForRecord(request.id);
+            await downloadManager.dropJobsForRecord(request.id);
             sendResponse({ ok: true, records });
             return;
           }

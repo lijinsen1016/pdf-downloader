@@ -14,14 +14,20 @@ export async function loadRecords(): Promise<PdfRecord[]> {
     .map((parsed) => parsed.data as PdfRecord);
 }
 
-export async function saveRecords(records: PdfRecord[]): Promise<void> {
+/**
+ * 写入记录。配额打满时退化为只保留最近一半，并**返回被丢弃的记录**，
+ * 由调用方清理它们对应的会话凭证，避免凭证成为孤儿。
+ */
+export async function saveRecords(records: PdfRecord[]): Promise<PdfRecord[]> {
   try {
     await browser.storage.session.set({ [STORAGE_KEYS.records]: records });
+    return [];
   } catch (error) {
-    // 配额打满时退化为只保留最近一半记录，避免整个捕获管线因为写入失败而中断。
-    const fallback = records.slice(0, Math.max(10, Math.floor(records.length / 2)));
+    const keep = Math.max(10, Math.floor(records.length / 2));
+    const fallback = records.slice(0, keep);
     console.warn('[pdf-catcher] failed to persist records, falling back to', fallback.length, error);
     await browser.storage.session.set({ [STORAGE_KEYS.records]: fallback });
+    return records.slice(keep);
   }
 }
 
