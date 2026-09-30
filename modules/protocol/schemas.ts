@@ -20,7 +20,6 @@ export const pdfRecordSchema = z.object({
   capturedAt: z.number(),
   tabId: z.number().optional(),
   statusCode: z.number().int(),
-  fromCache: z.boolean().optional(),
   partial: z.boolean().optional(),
   confidence: z.enum(['high', 'medium']),
   auth: pdfRecordAuthSchema,
@@ -66,10 +65,6 @@ export const settingsSchema = z.object({
   capturePostPdf: z.boolean().default(false),
   reusableHeaders: z.array(z.string()).default(['authorization'])
 });
-
-export type ParsedPdfRecord = z.infer<typeof pdfRecordSchema>;
-export type ParsedDownloadJob = z.infer<typeof downloadJobSchema>;
-export type ParsedSettings = z.infer<typeof settingsSchema>;
 
 export const popupToBackgroundSchema = z.discriminatedUnion('type', [
   z.object({
@@ -145,7 +140,8 @@ export const offscreenToDocumentSchema = z.discriminatedUnion('type', [
         base64: z.string().optional()
       })
       .optional(),
-    leaseMs: z.number().optional()
+    leaseMs: z.number().optional(),
+    requirePdfMagic: z.boolean().optional()
   }),
   z.object({
     type: z.literal('offscreen/revoke-blob'),
@@ -158,13 +154,74 @@ export const offscreenToDocumentSchema = z.discriminatedUnion('type', [
 ]);
 
 export type PopupToBackground = z.infer<typeof popupToBackgroundSchema>;
-export type OffscreenDocumentMessage = z.infer<typeof offscreenToDocumentSchema>;
 
-export type SnapshotState = {
-  records: PdfRecord[];
-  jobs: DownloadJob[];
-  history: DownloadHistoryItem[];
-  settings: Settings;
+/** background 的响应同样过 schema，前端不再靠 `as` 强转。 */
+export const stateGetResponseSchema = z.object({
+  ok: z.literal(true),
+  records: z.array(pdfRecordSchema),
+  jobs: z.array(downloadJobSchema),
+  history: z.array(historyItemSchema),
+  settings: settingsSchema
+});
+
+export const recordsResponseSchema = z.object({
+  ok: z.literal(true),
+  records: z.array(pdfRecordSchema)
+});
+
+export const jobsResponseSchema = z.object({
+  ok: z.literal(true),
+  jobs: z.array(downloadJobSchema)
+});
+
+export const settingsResponseSchema = z.object({
+  ok: z.literal(true),
+  settings: settingsSchema
+});
+
+export const historyResponseSchema = z.object({
+  ok: z.literal(true),
+  history: z.array(historyItemSchema)
+});
+
+export const openRecordResponseSchema = z.object({
+  ok: z.literal(true),
+  url: z.string(),
+  usedBlob: z.boolean(),
+  usedAuthRule: z.boolean().optional()
+});
+
+export const okResponseSchema = z.object({ ok: z.literal(true) });
+
+export const scanResponseSchema = z.object({
+  ok: z.literal(true),
+  count: z.number()
+});
+
+export const errorResponseSchema = z.object({
+  ok: z.literal(false),
+  errorKey: z.string(),
+  errorDetail: z.string().optional()
+});
+
+export const responseSchemas = {
+  'state/get': stateGetResponseSchema,
+  'records/delete': recordsResponseSchema,
+  'records/clear': recordsResponseSchema,
+  'records/open': openRecordResponseSchema,
+  'download/start': jobsResponseSchema,
+  'download/cancel': okResponseSchema,
+  'download/cancelAll': okResponseSchema,
+  'settings/get': settingsResponseSchema,
+  'settings/update': settingsResponseSchema,
+  'page/scan': scanResponseSchema,
+  'history/get': historyResponseSchema,
+  'history/delete': historyResponseSchema,
+  'history/clear': historyResponseSchema
+} satisfies Record<PopupToBackground['type'], z.ZodTypeAny>;
+
+export type ResponseByType = {
+  [K in keyof typeof responseSchemas]: z.infer<(typeof responseSchemas)[K]>;
 };
 
 export type PortEvent =

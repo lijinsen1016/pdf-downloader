@@ -126,10 +126,13 @@ export default defineBackground(() => {
           }
           case 'records/delete': {
             const records = await engine.deleteRecord(request.id);
+            downloadManager.dropJobsForRecord(request.id);
             sendResponse({ ok: true, records });
             return;
           }
           case 'records/clear': {
+            // 清记录必须同时清掉关联的下载任务，否则会残留指向已删记录的任务
+            await downloadManager.clearAllJobs();
             const records = await engine.clearAll();
             sendResponse({ ok: true, records });
             return;

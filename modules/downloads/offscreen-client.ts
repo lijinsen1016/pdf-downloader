@@ -42,6 +42,7 @@ export async function fetchBlobInOffscreen(params: {
   method?: 'GET' | 'POST';
   postBody?: StoredPostBody;
   leaseMs?: number;
+  requirePdfMagic?: boolean;
 }): Promise<{ blobUrl: string; contentType: string; size: number }> {
   await ensureOffscreenDocument();
   let response: unknown;

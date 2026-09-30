@@ -24,7 +24,7 @@ export interface PdfRecord {
   capturedAt: number;
   tabId?: number;
   statusCode: number;
-  fromCache?: boolean;
+  /** 仅通过 Range 请求观察到、尚未拿到完整响应体的记录 */
   partial?: boolean;
   confidence: PdfConfidence;
   auth: PdfRecordAuth;
@@ -114,5 +114,27 @@ export const MAX_POST_BODY_BYTES = 2 * 1024 * 1024;
 
 export const MAX_PENDING_REQUESTS = 2000;
 export const PENDING_TTL_MS = 2 * 60 * 1000;
+export const PENDING_SWEEP_INTERVAL_MS = 60 * 1000;
 export const MAX_CONCURRENT_DOWNLOADS = 3;
+/** UI 上允许继续追加任务的阈值（队列自带并发限制，这里只做按钮节流）。 */
+export const UI_MAX_ACTIVE_JOBS = MAX_CONCURRENT_DOWNLOADS * 2;
 export const OFFSCREEN_BLOB_LEASE_MS = 10 * 60 * 1000;
+
+/**
+ * 会话存储（storage.session 默认 10MB）的软上限：
+ * 超出后按插入顺序淘汰最旧的记录，避免配额打满导致写入静默失败。
+ */
+export const MAX_STORED_AUTH_HEADER_SETS = 300;
+export const MAX_STORED_POST_BODIES = 20;
+export const MAX_STORED_POST_BODY_BYTES = 6 * 1024 * 1024;
+
+/** 只有这些资源类型可能承载 PDF，其余请求不进入捕获管线。 */
+export type TrackedResourceType = 'main_frame' | 'sub_frame' | 'object' | 'xmlhttprequest' | 'other';
+
+export const TRACKED_RESOURCE_TYPES: TrackedResourceType[] = [
+  'main_frame',
+  'sub_frame',
+  'object',
+  'xmlhttprequest',
+  'other'
+];

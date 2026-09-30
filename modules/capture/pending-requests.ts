@@ -6,7 +6,6 @@ export interface PendingResponse {
   contentDisposition?: string;
   contentLength?: number;
   contentRangeTotal?: number;
-  fromCache?: boolean;
 }
 
 export interface CapturedAuthHeader {
@@ -38,9 +37,13 @@ export interface PendingRequest {
 export class PendingRequestStore {
   private readonly pending = new Map<string, PendingRequest>();
 
+  get size(): number {
+    return this.pending.size;
+  }
+
   set(request: PendingRequest): void {
     if (this.pending.size >= MAX_PENDING_REQUESTS) {
-      this.sweep(Date.now() - PENDING_TTL_MS);
+      this.sweep();
     }
     this.pending.set(request.requestId, request);
   }

@@ -1,16 +1,12 @@
 import { browser } from 'wxt/browser';
 import { safeParse, offscreenToDocumentSchema } from '@/modules/protocol/schemas';
 import { looksLikePdfFileName } from '@/modules/shared/file-name';
+import { hasPdfMagic, isPdfContentType } from '@/modules/shared/pdf-signature';
 import { parseContentDisposition } from '@/modules/shared/content-disposition';
 import type { StoredPostBody } from '@/modules/storage/post-body-repo';
 
 const controllers = new Map<string, AbortController>();
 const blobUrls = new Set<string>();
-
-const isPdfContentType = (contentType: string) => {
-  const mime = contentType.split(';')[0]?.trim().toLowerCase() ?? '';
-  return mime === 'application/pdf' || mime === 'application/x-pdf' || mime === 'text/pdf';
-};
 
 function base64ToBytes(base64: string): Uint8Array<ArrayBuffer> {
   const binary = atob(base64);
@@ -46,6 +42,7 @@ async function fetchPdfBlob(message: {
   method?: 'GET' | 'POST';
   postBody?: StoredPostBody;
   leaseMs?: number;
+  requirePdfMagic?: boolean;
 }): Promise<{ blobUrl: string; contentType: string; size: number }> {
   const controller = new AbortController();
   controllers.set(message.jobId, controller);
@@ -82,11 +79,20 @@ async function fetchPdfBlob(message: {
     const contentType = response.headers.get('content-type') ?? '';
     const disposition = response.headers.get('content-disposition') ?? undefined;
     const dispositionName = parseContentDisposition(disposition).filename;
-    if (!isPdfContentType(contentType) && !looksLikePdfFileName(dispositionName)) {
+
+    const blob = await response.blob();
+    const head = new Uint8Array(await blob.slice(0, 1100).arrayBuffer());
+    const magicOk = hasPdfMagic(head);
+
+    if (!magicOk && !isPdfContentType(contentType) && !looksLikePdfFileName(dispositionName)) {
+      throw new Error('response is not a PDF');
+    }
+    // 仅凭 URL 后缀推断出来的记录（requirePdfMagic）必须靠魔数确认，
+    // 否则会把返回 HTML 的 *.pdf 当成 PDF 下载下来。
+    if (!magicOk && message.requirePdfMagic) {
       throw new Error('response is not a PDF');
     }
 
-    const blob = await response.blob();
     const blobUrl = URL.createObjectURL(blob);
     blobUrls.add(blobUrl);
 

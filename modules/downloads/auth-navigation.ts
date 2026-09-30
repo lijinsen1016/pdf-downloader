@@ -52,20 +52,26 @@ export async function openWithAuthorizationRule(
     }
   };
 
-  const tab = await browser.tabs.create({ url, active: true });
-  const tabId = tab.id;
+  try {
+    const tab = await browser.tabs.create({ url, active: true });
+    const tabId = tab.id;
 
-  const onUpdated = (updatedTabId: number, info: { status?: string }) => {
-    if (updatedTabId === tabId && info.status === 'complete') {
+    const onUpdated = (updatedTabId: number, info: { status?: string }) => {
+      if (updatedTabId === tabId && info.status === 'complete') {
+        void cleanup();
+      }
+    };
+
+    browser.tabs.onUpdated.addListener(onUpdated);
+    setTimeout(() => {
+      browser.tabs.onUpdated.removeListener(onUpdated);
       void cleanup();
-    }
-  };
-
-  browser.tabs.onUpdated.addListener(onUpdated);
-  setTimeout(() => {
-    browser.tabs.onUpdated.removeListener(onUpdated);
-    void cleanup();
-  }, 15_000);
+    }, 15_000);
+  } catch (error) {
+    // 标签页创建失败时规则必须立刻撤销，否则鉴权头会一直注入到会话结束
+    await cleanup();
+    throw error;
+  }
 
   return true;
 }

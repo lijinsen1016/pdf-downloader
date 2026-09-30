@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
-import { browser } from 'wxt/browser';
-import type { PopupToBackground } from '@/modules/protocol/schemas';
+import { request } from '@/modules/protocol/client';
+import { describeError } from '@/modules/protocol/errors';
 import { DEFAULT_SETTINGS, type Settings } from '@/modules/shared/types';
 import { setLanguage } from '@/modules/i18n';
 
@@ -15,55 +15,56 @@ const saving = ref(false);
 const saved = ref(false);
 const clearing = ref(false);
 
-async function send(message: PopupToBackground): Promise<{ ok?: boolean } & Record<string, unknown>> {
-  return browser.runtime.sendMessage(message) as Promise<{ ok?: boolean } & Record<string, unknown>>;
+function notifyError(error: unknown): void {
+  window.alert(describeError(error, t));
 }
 
 async function load(): Promise<void> {
   try {
-    const response = await send({ type: 'settings/get' });
-    if (response.ok && response.settings) {
-      form.value = response.settings as Settings;
-      ignoredHostsText.value = form.value.ignoredHosts.join('\n');
-      reusableHeadersText.value = form.value.reusableHeaders.join('\n');
-      setLanguage(form.value.language);
-    }
+    const response = await request({ type: 'settings/get' });
+    form.value = response.settings;
+    ignoredHostsText.value = response.settings.ignoredHosts.join('\n');
+    reusableHeadersText.value = response.settings.reusableHeaders.join('\n');
+    setLanguage(response.settings.language);
   } catch {
     // 首次打开时使用默认值
   }
+}
+
+function buildPatch(): Partial<Settings> {
+  return {
+    captureEnabled: form.value.captureEnabled,
+    language: form.value.language,
+    retentionMinutes: Number(form.value.retentionMinutes),
+    maxRecords: Number(form.value.maxRecords),
+    reuseAuthorization: form.value.reuseAuthorization,
+    historyEnabled: form.value.historyEnabled,
+    capturePostPdf: form.value.capturePostPdf,
+    reusableHeaders: reusableHeadersText.value
+      .split('\n')
+      .map((header) => header.trim().toLowerCase())
+      .filter(Boolean),
+    ignoredHosts: ignoredHostsText.value
+      .split('\n')
+      .map((host) => host.trim())
+      .filter(Boolean)
+  };
 }
 
 async function save(): Promise<void> {
   saving.value = true;
   saved.value = false;
   try {
-    const patch: Partial<Settings> = {
-      captureEnabled: form.value.captureEnabled,
-      language: form.value.language,
-      retentionMinutes: Number(form.value.retentionMinutes),
-      maxRecords: Number(form.value.maxRecords),
-      reuseAuthorization: form.value.reuseAuthorization,
-      historyEnabled: form.value.historyEnabled,
-      capturePostPdf: form.value.capturePostPdf,
-      reusableHeaders: reusableHeadersText.value
-        .split('\n')
-        .map((header) => header.trim().toLowerCase())
-        .filter(Boolean),
-      ignoredHosts: ignoredHostsText.value
-        .split('\n')
-        .map((host) => host.trim())
-        .filter(Boolean)
-    };
-    const response = await send({ type: 'settings/update', patch });
-    if (response.ok && response.settings) {
-      form.value = response.settings as Settings;
-      reusableHeadersText.value = form.value.reusableHeaders.join('\n');
-      setLanguage(form.value.language);
-      saved.value = true;
-      window.setTimeout(() => {
-        saved.value = false;
-      }, 2000);
-    }
+    const response = await request({ type: 'settings/update', patch: buildPatch() });
+    form.value = response.settings;
+    reusableHeadersText.value = response.settings.reusableHeaders.join('\n');
+    setLanguage(response.settings.language);
+    saved.value = true;
+    window.setTimeout(() => {
+      saved.value = false;
+    }, 2000);
+  } catch (error) {
+    notifyError(error);
   } finally {
     saving.value = false;
   }
@@ -73,8 +74,10 @@ async function clearAll(): Promise<void> {
   if (!window.confirm(t('app.confirmClearText'))) return;
   clearing.value = true;
   try {
-    await send({ type: 'download/cancelAll' });
-    await send({ type: 'records/clear' });
+    // background 会在清空记录时一并取消并清理关联的下载任务
+    await request({ type: 'records/clear' });
+  } catch (error) {
+    notifyError(error);
   } finally {
     clearing.value = false;
   }
@@ -83,9 +86,9 @@ async function clearAll(): Promise<void> {
 async function clearHistory(): Promise<void> {
   if (!window.confirm(t('options.clearHistoryHint'))) return;
   try {
-    await send({ type: 'history/clear' });
-  } finally {
-    // 列表由 popup 自行刷新
+    await request({ type: 'history/clear' });
+  } catch (error) {
+    notifyError(error);
   }
 }
 

@@ -1,107 +1,64 @@
-import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue';
+import { onBeforeUnmount, onMounted, reactive, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { browser, type Browser } from 'wxt/browser';
 import { setLanguage } from '@/modules/i18n';
-import type { PortEvent, PopupToBackground } from '@/modules/protocol/schemas';
-import {
-  DEFAULT_SETTINGS,
-  type DownloadHistoryItem,
-  type DownloadJob,
-  type PdfRecord,
-  type Settings
-} from '@/modules/shared/types';
-import { getHost } from '@/modules/shared/url';
+import { request } from '@/modules/protocol/client';
+import type { PortEvent } from '@/modules/protocol/schemas';
+import { DEFAULT_SETTINGS, type Settings } from '@/modules/shared/types';
+import { useCaptureList } from './composables/useCaptureList';
+import { useDownloadHistory } from './composables/useDownloadHistory';
+import { useDownloadJobs } from './composables/useDownloadJobs';
+import { useToast } from './composables/useToast';
+import { describeError } from '@/modules/protocol/errors';
 
-export type RecordFilter = 'all' | 'auth' | 'today';
+export type PopupView = 'capture' | 'history';
 
-interface ToastState {
-  message: string;
-  type: 'success' | 'error';
-}
-
+/**
+ * 组装层：连接 background 端口、分发广播，并把各切片组合成面板 store。
+ * 具体逻辑分别在 composables 里，这里只做接线与跨切片操作。
+ */
 export function usePopupStore() {
   const { t } = useI18n();
+  const { toast, showToast, disposeToast } = useToast();
 
-  const records = ref<PdfRecord[]>([]);
-  const jobs = ref<DownloadJob[]>([]);
-  const history = ref<DownloadHistoryItem[]>([]);
-  const settings = ref<Settings>({ ...DEFAULT_SETTINGS });
-  const view = ref<'capture' | 'history'>('capture');
-  const loading = ref(true);
   const searchText = ref('');
-  const filter = ref<RecordFilter>('all');
-  const selectedIds = ref<Set<string>>(new Set());
-  const toast = ref<ToastState | null>(null);
+  const settings = ref<Settings>({ ...DEFAULT_SETTINGS });
+  const view = ref<PopupView>('capture');
+  const loading = ref(true);
   const showConfirm = ref(false);
 
+  const capture = useCaptureList({ t, showToast, searchText });
+  const downloads = useDownloadJobs({ t, showToast });
+  const history = useDownloadHistory({ t, showToast, searchText });
+
   let port: Browser.runtime.Port | undefined;
-  let toastTimer: ReturnType<typeof setTimeout> | undefined;
 
-  const filteredRecords = computed(() => {
-    const keyword = searchText.value.trim().toLowerCase();
-    return records.value.filter((record) => {
-      const matchesKeyword =
-        !keyword ||
-        record.fileName.toLowerCase().includes(keyword) ||
-        record.url.toLowerCase().includes(keyword) ||
-        getHost(record.url).toLowerCase().includes(keyword);
-      if (!matchesKeyword) return false;
+  function applySettings(next: Settings): void {
+    settings.value = next;
+    setLanguage(next.language);
+  }
 
-      if (filter.value === 'auth') return record.auth.cookie || record.auth.authHeaders.length > 0;
-      if (filter.value === 'today') return isToday(record.capturedAt);
-      return true;
-    });
-  });
-
-  const selectedVisibleIds = computed(() => {
-    const filteredIds = new Set(filteredRecords.value.map((record) => record.id));
-    return [...selectedIds.value].filter((id) => filteredIds.has(id));
-  });
-
-  const filteredHistory = computed(() => {
-    const keyword = searchText.value.trim().toLowerCase();
-    return history.value.filter((item) => {
-      return (
-        !keyword ||
-        item.fileName.toLowerCase().includes(keyword) ||
-        item.url.toLowerCase().includes(keyword) ||
-        item.host.toLowerCase().includes(keyword)
-      );
-    });
-  });
-
-  const downloadTargetIds = computed(() => {
-    if (selectedVisibleIds.value.length > 0) return selectedVisibleIds.value;
-    return filteredRecords.value.map((record) => record.id);
-  });
-
-  const activeJobCount = computed(
-    () =>
-      jobs.value.filter((job) =>
-        ['queued', 'fetching', 'starting', 'downloading'].includes(job.status)
-      ).length
-  );
-
-  const filterOptions = computed(() => [
-    { value: 'all' as const, label: t('filter.all'), count: records.value.length },
-    {
-      value: 'auth' as const,
-      label: t('filter.auth'),
-      count: records.value.filter((record) => record.auth.cookie || Boolean(record.auth.bearerScheme)).length
-    },
-    {
-      value: 'today' as const,
-      label: t('filter.today'),
-      count: records.value.filter((record) => isToday(record.capturedAt)).length
+  function handlePortEvent(event: PortEvent): void {
+    switch (event.type) {
+      case 'records/changed':
+        capture.setRecords(event.records);
+        break;
+      case 'jobs/changed':
+        downloads.setJobs(event.jobs);
+        break;
+      case 'settings/changed':
+        applySettings(event.settings);
+        break;
+      case 'history/changed':
+        history.setHistory(event.history);
+        break;
+      case 'error':
+        showToast(
+          event.detail ? `${t(event.errorKey)}: ${event.detail}` : t(event.errorKey),
+          'error'
+        );
+        break;
     }
-  ]);
-
-  function showToast(message: string, type: ToastState['type'] = 'success'): void {
-    if (toastTimer) clearTimeout(toastTimer);
-    toast.value = { message, type };
-    toastTimer = setTimeout(() => {
-      toast.value = null;
-    }, 2600);
   }
 
   function connectPort(): void {
@@ -111,47 +68,16 @@ export function usePopupStore() {
     });
   }
 
-  function handlePortEvent(event: PortEvent): void {
-    switch (event.type) {
-      case 'records/changed':
-        records.value = event.records;
-        break;
-      case 'jobs/changed':
-        jobs.value = event.jobs;
-        break;
-      case 'settings/changed':
-        applySettings(event.settings);
-        break;
-      case 'history/changed':
-        history.value = event.history;
-        break;
-      case 'error':
-        showToast(`${t(event.errorKey)}${event.detail ? `: ${event.detail}` : ''}`, 'error');
-        break;
-    }
-  }
-
-  function applySettings(next: Settings): void {
-    settings.value = next;
-    setLanguage(next.language);
-  }
-
-  async function send(message: PopupToBackground): Promise<{ ok?: boolean } & Record<string, unknown>> {
-    return browser.runtime.sendMessage(message) as Promise<{ ok?: boolean } & Record<string, unknown>>;
-  }
-
   async function loadState(): Promise<void> {
     loading.value = true;
     try {
-      const response = await send({ type: 'state/get' });
-      if (response.ok) {
-        records.value = (response.records as PdfRecord[]) ?? [];
-        jobs.value = (response.jobs as DownloadJob[]) ?? [];
-        history.value = (response.history as DownloadHistoryItem[]) ?? [];
-        applySettings((response.settings as Settings) ?? settings.value);
-      }
-    } catch {
-      showToast(t('message.requestFailed'), 'error');
+      const response = await request({ type: 'state/get' });
+      capture.setRecords(response.records);
+      downloads.setJobs(response.jobs);
+      history.setHistory(response.history);
+      applySettings(response.settings);
+    } catch (error) {
+      showToast(describeError(error, t), 'error');
     } finally {
       loading.value = false;
     }
@@ -159,56 +85,26 @@ export function usePopupStore() {
 
   async function toggleCapture(): Promise<void> {
     try {
-      const response = await send({
+      const response = await request({
         type: 'settings/update',
         patch: { captureEnabled: !settings.value.captureEnabled }
       });
-      if (response.ok) applySettings(response.settings as Settings);
-    } catch {
-      showToast(t('message.requestFailed'), 'error');
-    }
-  }
-
-  async function downloadRecord(id: string): Promise<void> {
-    try {
-      const response = await send({ type: 'download/start', ids: [id] });
-      if (response.ok) showToast(t('message.downloadSuccess'));
-      else showToast(t('message.downloadFailed'), 'error');
-    } catch {
-      showToast(t('message.downloadFailed'), 'error');
+      applySettings(response.settings);
+    } catch (error) {
+      showToast(describeError(error, t), 'error');
     }
   }
 
   async function downloadSelected(): Promise<void> {
-    const ids = downloadTargetIds.value;
-    if (!ids.length) {
-      showToast(t('message.noSelection'), 'error');
-      return;
-    }
-    try {
-      const response = await send({ type: 'download/start', ids });
-      if (response.ok) showToast(t('message.batchStarted', { count: ids.length }));
-      else showToast(t('message.downloadFailed'), 'error');
-    } catch {
-      showToast(t('message.downloadFailed'), 'error');
-    }
+    await downloads.startDownloads(capture.downloadTargetIds.value);
   }
 
-  async function openHistoryUrl(url: string): Promise<void> {
+  async function openRecord(recordId: string): Promise<void> {
     try {
-      await browser.tabs.create({ url, active: true });
-    } catch {
-      showToast(t('message.openFailed'), 'error');
-    }
-  }
-
-  async function openRecord(id: string): Promise<void> {
-    try {
-      const response = await send({ type: 'records/open', id });
-      if (response.ok) showToast(t('message.openedPdf'));
-      else showToast(t('message.openFailed'), 'error');
-    } catch {
-      showToast(t('message.openFailed'), 'error');
+      await request({ type: 'records/open', id: recordId });
+      showToast(t('message.openedPdf'));
+    } catch (error) {
+      showToast(describeError(error, t), 'error');
     }
   }
 
@@ -221,115 +117,26 @@ export function usePopupStore() {
     }
   }
 
-  async function deleteRecord(id: string): Promise<void> {
-    try {
-      const response = await send({ type: 'records/delete', id });
-      if (response.ok) {
-        records.value = (response.records as PdfRecord[]) ?? [];
-        removeSelected(id);
-        showToast(t('message.listCleared'));
-      }
-    } catch {
-      showToast(t('message.requestFailed'), 'error');
-    }
-  }
-
-  async function clearAll(): Promise<void> {
+  function clearAll(): void {
     showConfirm.value = false;
-    try {
-      const response = await send({ type: 'records/clear' });
-      if (response.ok) {
-        records.value = (response.records as PdfRecord[]) ?? [];
-        selectedIds.value = new Set();
-        showToast(t('message.listCleared'));
-      }
-    } catch {
-      showToast(t('message.requestFailed'), 'error');
-    }
+    void capture.clearAll();
   }
 
-  async function scanActivePage(): Promise<void> {
-    try {
-      const response = await send({ type: 'page/scan' });
-      if (response.ok) {
-        const count = Number(response.count ?? 0);
-        showToast(count > 0 ? t('message.scanSuccess', { count }) : t('message.scanEmpty'), count > 0 ? 'success' : 'error');
-      } else {
-        showToast(t('message.scanFailed'), 'error');
-      }
-    } catch {
-      showToast(t('message.scanFailed'), 'error');
-    }
+  /** 打开「清空记录」确认框；避免子组件直接改 store 上的状态字段。 */
+  function requestClear(): void {
+    showConfirm.value = true;
   }
 
-  async function deleteHistoryItem(id: string): Promise<void> {
-    try {
-      const response = await send({ type: 'history/delete', id });
-      if (response.ok) history.value = (response.history as DownloadHistoryItem[]) ?? [];
-    } catch {
-      showToast(t('message.requestFailed'), 'error');
-    }
-  }
-
-  async function clearHistory(): Promise<void> {
-    try {
-      const response = await send({ type: 'history/clear' });
-      if (response.ok) history.value = (response.history as DownloadHistoryItem[]) ?? [];
-    } catch {
-      showToast(t('message.requestFailed'), 'error');
-    }
-  }
-
-  async function cancelJob(jobId: string): Promise<void> {
-    try {
-      await send({ type: 'download/cancel', jobId });
-    } catch {
-      showToast(t('message.requestFailed'), 'error');
-    }
-  }
-
-  function toggleSelected(id: string): void {
-    const next = new Set(selectedIds.value);
-    if (next.has(id)) next.delete(id);
-    else next.add(id);
-    selectedIds.value = next;
-  }
-
-  function toggleSelectAll(): void {
-    const allSelected = filteredRecords.value.every((record) => selectedIds.value.has(record.id));
-    const next = new Set(selectedIds.value);
-    if (allSelected) {
-      for (const record of filteredRecords.value) next.delete(record.id);
-    } else {
-      for (const record of filteredRecords.value) next.add(record.id);
-    }
-    selectedIds.value = next;
-  }
-
-  function removeSelected(id: string): void {
-    const next = new Set(selectedIds.value);
-    next.delete(id);
-    selectedIds.value = next;
-  }
-
-  function clearSelection(): void {
-    selectedIds.value = new Set();
+  function dismissClear(): void {
+    showConfirm.value = false;
   }
 
   function clearSearch(): void {
     searchText.value = '';
   }
 
-  function activeJobForRecord(recordId: string): DownloadJob | undefined {
-    return jobs.value.find(
-      (job) => job.recordId === recordId && ['queued', 'fetching', 'starting', 'downloading'].includes(job.status)
-    );
-  }
-
-  function jobForRecord(recordId: string): DownloadJob | undefined {
-    const active = activeJobForRecord(recordId);
-    if (active) return active;
-    return jobs.value.find((job) => job.recordId === recordId && job.status !== 'done');
+  function openOptions(): void {
+    void browser.runtime.openOptionsPage();
   }
 
   function formatTime(timestamp: number): string {
@@ -360,38 +167,6 @@ export function usePopupStore() {
     return `${bytes} B`;
   }
 
-  function statusLabel(job: DownloadJob): string {
-    return t(`status.${job.status}`);
-  }
-
-  function jobProgress(job: DownloadJob): number {
-    if (!job.totalBytes || !job.receivedBytes) return 0;
-    return Math.min(100, Math.round((job.receivedBytes / job.totalBytes) * 100));
-  }
-
-  function statusForRecord(recordId: string): string {
-    const job = jobForRecord(recordId);
-    return job ? statusLabel(job) : '';
-  }
-
-  function progressForRecord(recordId: string): number {
-    const job = jobForRecord(recordId);
-    return job ? jobProgress(job) : 0;
-  }
-
-  function errorForRecord(recordId: string): string {
-    return jobForRecord(recordId)?.errorDetail ?? '';
-  }
-
-  function cancelForRecord(recordId: string): void {
-    const job = activeJobForRecord(recordId);
-    if (job) void cancelJob(job.id);
-  }
-
-  function openOptions(): void {
-    void browser.runtime.openOptionsPage();
-  }
-
   onMounted(() => {
     connectPort();
     void loadState();
@@ -399,58 +174,39 @@ export function usePopupStore() {
 
   onBeforeUnmount(() => {
     port?.disconnect();
-    if (toastTimer) clearTimeout(toastTimer);
+    disposeToast();
   });
 
   return reactive({
-    activeJobCount,
-    activeJobForRecord,
-    cancelForRecord,
-    cancelJob,
+    // 视图壳
+    settings,
+    view,
+    loading,
+    showConfirm,
+    searchText,
+    toast,
+    // 记录切片
+    ...capture,
+    // 下载任务切片
+    ...downloads,
+    // 历史切片
+    ...history,
+    // 跨切片动作
     clearAll,
-    copyUrl,
-    deleteRecord,
-    downloadRecord,
-    downloadSelected,
-    clearHistory,
     clearSearch,
-    clearSelection,
-    deleteHistoryItem,
-    downloadTargetIds,
-    errorForRecord,
-    filter,
-    filterOptions,
-    filteredHistory,
-    filteredRecords,
+    copyUrl,
+    dismissClear,
+    downloadSelected,
     formatHistoryTime,
     formatSize,
     formatTime,
-    history,
-    jobForRecord,
-    jobProgress,
-    jobs,
-    loading,
-    openHistoryUrl,
-    progressForRecord,
+    loadState,
     openOptions,
     openRecord,
-    records,
-    scanActivePage,
-    searchText,
-    selectedIds,
-    selectedVisibleIds,
-    settings,
-    showConfirm,
-    view,
-    statusForRecord,
-    statusLabel,
-    toast,
-    toggleCapture,
-    toggleSelectAll,
-    toggleSelected
+    requestClear,
+    showToast,
+    toggleCapture
   });
 }
 
-function isToday(timestamp: number): boolean {
-  return new Date(timestamp).toDateString() === new Date().toDateString();
-}
+export type PopupStore = ReturnType<typeof usePopupStore>;
